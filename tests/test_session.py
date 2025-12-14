@@ -6,6 +6,7 @@ import pytest
 
 from beadsflow.application.errors import ConfigError
 from beadsflow.application.session import SessionStartRequest, SessionStatusRequest, handle_session
+from beadsflow.entrypoints import cli as cli_mod
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,3 +72,31 @@ def test_session_start_invokes_zellij(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls
     assert calls[0][:5] == ["zellij", "-s", "sess", "-c", "--"]
     assert calls[0][5:10] == ["uv", "run", "beadsflow", "run", "beadsflow-3cx"]
+
+
+def test_cli_session_start_forwards_unknown_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[SessionStartRequest] = []
+
+    def fake_handle_session(request: object) -> int:
+        assert isinstance(request, SessionStartRequest)
+        captured.append(request)
+        return 0
+
+    monkeypatch.setattr(cli_mod, "handle_session", fake_handle_session)
+    exit_code = cli_mod.main(
+        [
+            "session",
+            "start",
+            "sess",
+            "--epic",
+            "beadsflow-3cx",
+            "--",
+            "--interval",
+            "30",
+            "--verbose",
+        ]
+    )
+    assert exit_code == 0
+    assert captured
+    assert captured[0].epic_id == "beadsflow-3cx"
+    assert captured[0].run_args == ["--interval", "30", "--verbose"]

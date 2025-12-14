@@ -43,11 +43,6 @@ def build_parser() -> argparse.ArgumentParser:
     session_start = session_subparsers.add_parser("start", help="Start a session")
     session_start.add_argument("name")
     session_start.add_argument("--epic", required=True)
-    session_start.add_argument(
-        "run_args",
-        nargs=argparse.REMAINDER,
-        help="Arguments forwarded to `beadsflow run` (use `--` to separate flags).",
-    )
 
     session_attach = session_subparsers.add_parser("attach", help="Attach to a session")
     session_attach.add_argument("name")
@@ -82,7 +77,7 @@ def _handle_session(args: argparse.Namespace) -> CliResult:
     request: SessionRequest
     match args.session_command:
         case "start":
-            run_args = list(args.run_args)
+            run_args = list(getattr(args, "run_args", []))
             if run_args and run_args[0] == "--":
                 run_args = run_args[1:]
             request = SessionStartRequest(name=str(args.name), epic_id=str(args.epic), run_args=run_args)
@@ -107,7 +102,15 @@ def _handle_session(args: argparse.Namespace) -> CliResult:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
+
+    # `session start` forwards all remaining args to `beadsflow run`, which means we must
+    # accept flags that this CLI does not know about (e.g. `--interval`).
+    if len(argv) >= 2 and argv[0] == "session" and argv[1] == "start":
+        args, run_args = parser.parse_known_args(argv)
+        args.run_args = run_args
+    else:
+        args = parser.parse_args(argv)
 
     if args.command == "run":
         return _handle_run(args).exit_code
