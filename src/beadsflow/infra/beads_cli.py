@@ -40,16 +40,45 @@ class BeadsCli:
         env["BEADS_DIR"] = self.beads_dir
         return env
 
-    def _run_json(self, *args: str) -> Any:
+    @staticmethod
+    def _is_db_out_of_sync(stderr: str) -> bool:
+        return "Database out of sync with JSONL" in stderr
+
+    def _sync_import_only(self) -> None:
         completed = subprocess.run(
-            ["bd", "--no-daemon", "--json", *args],
+            ["bd", "--no-daemon", "sync", "--import-only"],
             check=False,
             capture_output=True,
             text=True,
             env=self._env(),
         )
         if completed.returncode != 0:
-            raise BeadsError(f"bd failed ({completed.returncode}): bd {' '.join(args)}\n{completed.stderr.strip()}")
+            raise BeadsError(f"bd sync --import-only failed: {completed.stderr.strip()}")
+
+    def _run_json(self, *args: str) -> Any:
+        argv = ["bd", "--no-daemon", "--json", *args]
+        completed = subprocess.run(
+            argv,
+            check=False,
+            capture_output=True,
+            text=True,
+            env=self._env(),
+        )
+        if completed.returncode != 0:
+            stderr = completed.stderr.strip()
+            if self._is_db_out_of_sync(stderr):
+                self._sync_import_only()
+                completed = subprocess.run(
+                    argv,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=self._env(),
+                )
+            if completed.returncode != 0:
+                raise BeadsError(
+                    f"bd failed ({completed.returncode}): bd {' '.join(args)}\n{(completed.stderr or '').strip()}"
+                )
         try:
             return json.loads(completed.stdout)
         except json.JSONDecodeError as exc:  # pragma: no cover
@@ -63,26 +92,50 @@ class BeadsCli:
         return self._parse_issue(raw)
 
     def comment(self, issue_id: str, text: str) -> None:
+        argv = ["bd", "--no-daemon", "comment", issue_id, text]
         completed = subprocess.run(
-            ["bd", "--no-daemon", "comment", issue_id, text],
+            argv,
             check=False,
             capture_output=True,
             text=True,
             env=self._env(),
         )
         if completed.returncode != 0:
-            raise BeadsError(f"bd comment failed: {completed.stderr.strip()}")
+            stderr = completed.stderr.strip()
+            if self._is_db_out_of_sync(stderr):
+                self._sync_import_only()
+                completed = subprocess.run(
+                    argv,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=self._env(),
+                )
+            if completed.returncode != 0:
+                raise BeadsError(f"bd comment failed: {(completed.stderr or '').strip()}")
 
     def close(self, issue_id: str) -> None:
+        argv = ["bd", "--no-daemon", "close", issue_id]
         completed = subprocess.run(
-            ["bd", "--no-daemon", "close", issue_id],
+            argv,
             check=False,
             capture_output=True,
             text=True,
             env=self._env(),
         )
         if completed.returncode != 0:
-            raise BeadsError(f"bd close failed: {completed.stderr.strip()}")
+            stderr = completed.stderr.strip()
+            if self._is_db_out_of_sync(stderr):
+                self._sync_import_only()
+                completed = subprocess.run(
+                    argv,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=self._env(),
+                )
+            if completed.returncode != 0:
+                raise BeadsError(f"bd close failed: {(completed.stderr or '').strip()}")
 
     def _parse_issue(self, raw: dict[str, Any]) -> Issue:
         dependencies = [
