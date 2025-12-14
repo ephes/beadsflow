@@ -47,6 +47,66 @@ on_command_failure = "stop"
 command_timeout_seconds = 3600
 ```
 
+### Command execution semantics
+
+- `command` is **not** run via an implicit shell; it is parsed with `shlex.split(...)` into argv and executed directly.
+- If you want shell features (pipes, heredocs, `set -euo pipefail`, etc.), wrap your command explicitly: `bash -lc '...'`.
+- `{epic_id}` and `{issue_id}` in the configured argv are substituted per run.
+- The following env vars are always provided to implementer/reviewer commands:
+  - `BEADSFLOW_EPIC_ID`, `BEADSFLOW_ISSUE_ID`
+  - `BEADS_DIR`, `BEADS_NO_DAEMON=1`
+
+### Codex CLI implementer + reviewer profiles (example)
+
+This is a practical config that runs Codex CLI for both phases and has the reviewer emit an autopilot marker (`LGTM` / `Changes requested:`).
+
+```toml
+implementer = "codex"
+reviewer = "codex"
+
+[implementers.codex]
+command = """bash -lc 'set -euo pipefail
+issue="{issue_id}"
+epic="{epic_id}"
+msgfile="$(mktemp -t beadsflow-codex-msg.XXXXXX)"
+trap "rm -f \\"$msgfile\\"" EXIT
+
+codex --ask-for-approval never exec --sandbox workspace-write --output-last-message "$msgfile" \
+  "Implement bead ${issue} under epic ${epic}. First, read the bead and deps using JSONL mode: bd --no-daemon --no-db show ${issue}; bd --no-daemon --no-db dep tree ${issue}. Implement the acceptance criteria by editing files in this repo. Ensure there is a non-empty git diff when done. Do not post Beads comments yourself."
+
+just test
+just typecheck
+just lint
+
+body="$(cat "$msgfile")"
+comment_text="$(cat <<EOF
+Ready for review:
+
+$body
+
+Validation:
+- just test
+- just typecheck
+- just lint
+EOF
+)"
+bd --no-daemon --no-db comment "$issue" "$comment_text"
+'"""
+
+[reviewers.codex]
+command = """bash -lc 'set -euo pipefail
+issue="{issue_id}"
+epic="{epic_id}"
+msgfile="$(mktemp -t beadsflow-codex-review.XXXXXX)"
+trap "rm -f \\"$msgfile\\"" EXIT
+
+codex --ask-for-approval never exec --sandbox workspace-write --output-last-message "$msgfile" \
+  "Review bead ${issue} under epic ${epic}. Review the repo state and changes. Respond with a Beads comment. The first non-empty line must be exactly LGTM or start with Changes requested:. Do not wrap that marker in markdown/backticks."
+
+bd --no-daemon comment "$issue" "$(cat "$msgfile")"
+'"""
+```
+
 Environment overrides (optional):
 
 **bash/zsh**
