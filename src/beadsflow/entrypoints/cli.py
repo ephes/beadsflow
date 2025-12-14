@@ -17,11 +17,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help="Run the automation loop for an epic")
     run_parser.add_argument("epic_id")
-    run_parser.add_argument("--beads-dir", default=".beads")
+    run_parser.add_argument("--beads-dir", default=None, help="Beads directory (default: discover .beads)")
     run_parser.add_argument("--config", default=None)
     run_parser.add_argument("--once", action="store_true", help="Do a single iteration then exit")
-    run_parser.add_argument("--interval", type=int, default=30, help="Sleep interval between iterations")
+    run_parser.add_argument("--interval", type=int, default=None, help="Sleep interval between iterations")
     run_parser.add_argument("--dry-run", action="store_true", help="Print what would run without executing")
+    run_parser.add_argument("--implementer", default=None, help="Implementer profile name")
+    run_parser.add_argument("--reviewer", default=None, help="Reviewer profile name")
+    run_parser.add_argument("--max-iterations", type=int, default=None, help="Safety cap for iterations")
+    run_parser.add_argument("--verbose", action="store_true")
+    run_parser.add_argument("--quiet", action="store_true")
 
     session_parser = subparsers.add_parser("session", help="Manage a zellij session for an epic run")
     session_subparsers = session_parser.add_subparsers(dest="session_command", required=True)
@@ -45,11 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
 def _handle_run(args: argparse.Namespace) -> CliResult:
     request = RunEpicRequest(
         epic_id=str(args.epic_id),
-        beads_dir=str(args.beads_dir),
+        beads_dir=str(args.beads_dir) if args.beads_dir is not None else None,
         config_path=str(args.config) if args.config is not None else None,
         once=bool(args.once),
-        interval_seconds=int(args.interval),
+        interval_seconds=int(args.interval) if args.interval is not None else None,
         dry_run=bool(args.dry_run),
+        implementer=str(args.implementer) if args.implementer is not None else None,
+        reviewer=str(args.reviewer) if args.reviewer is not None else None,
+        max_iterations=int(args.max_iterations) if args.max_iterations is not None else None,
+        verbose=bool(args.verbose),
+        quiet=bool(args.quiet),
     )
     return CliResult(exit_code=run_epic(request))
 
