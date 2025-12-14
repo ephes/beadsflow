@@ -96,23 +96,28 @@ Notes:
 
 ### Attach (recommended workflow)
 
-`beadsflow session` subcommands exist but are currently placeholders; for now, use your terminal multiplexer directly.
-
-Example with zellij:
+If you use zellij, `beadsflow session` can start and manage a session for you.
 
 ```bash
-zellij -s beadsflow-<epic-id> -c -- uv run beadsflow run <epic-id> --interval 30
+uv run beadsflow session start beadsflow-<epic-id> --epic <epic-id> -- --interval 30
 ```
 
 Attach later:
 
 ```bash
-zellij attach beadsflow-<epic-id>
+uv run beadsflow session attach beadsflow-<epic-id>
 ```
 
 Stop the session:
 
 ```bash
-zellij kill-session beadsflow-<epic-id>
+uv run beadsflow session stop beadsflow-<epic-id>
 ```
 
+Check session status:
+
+```bash
+uv run beadsflow session status beadsflow-<epic-id>
+```
+
+If zellij is not installed, `beadsflow session ...` prints an equivalent manual `uv run beadsflow run ...` command.
