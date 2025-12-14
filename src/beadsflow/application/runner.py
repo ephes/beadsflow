@@ -114,8 +114,8 @@ class EpicRunLoop:
             self.beads.comment(issue_id, self._format_failure("implementer", result))
             raise CommandError(f"Implementer failed with code {result.returncode}")
 
-        refreshed = self.beads.get_issue(issue_id)
-        if determine_next_work(issue_id=refreshed.id, comments=refreshed.comments).phase is not Phase.REVIEW:
+        refreshed, phase = self._wait_for_phase(issue_id=issue_id, expected={Phase.REVIEW})
+        if phase is not Phase.REVIEW:
             self.beads.comment(issue_id, "Implementer completed but did not mark `Ready for review:`; stopping.")
             raise CommandError("Implementer did not mark Ready for review")
 
@@ -134,9 +134,8 @@ class EpicRunLoop:
             self.beads.comment(issue_id, self._format_failure("reviewer", result))
             raise CommandError(f"Reviewer failed with code {result.returncode}")
 
-        refreshed = self.beads.get_issue(issue_id)
-        refreshed_phase = determine_next_work(issue_id=refreshed.id, comments=refreshed.comments).phase
-        if refreshed_phase not in {Phase.CLOSE, Phase.IMPLEMENT}:
+        refreshed, phase = self._wait_for_phase(issue_id=issue_id, expected={Phase.CLOSE, Phase.IMPLEMENT})
+        if phase not in {Phase.CLOSE, Phase.IMPLEMENT}:
             self.beads.comment(
                 issue_id,
                 "Reviewer completed but did not comment `LGTM` or `Changes requested:`; stopping.",
@@ -154,6 +153,16 @@ class EpicRunLoop:
                 "BEADS_NO_DAEMON": "1",
             },
         )
+
+    def _wait_for_phase(self, *, issue_id: str, expected: set[Phase]) -> tuple[Issue, Phase]:
+        deadline = time.monotonic() + 10.0
+        refreshed = self.beads.get_issue(issue_id)
+        phase = determine_next_work(issue_id=refreshed.id, comments=refreshed.comments).phase
+        while phase not in expected and time.monotonic() < deadline:
+            time.sleep(0.5)
+            refreshed = self.beads.get_issue(issue_id)
+            phase = determine_next_work(issue_id=refreshed.id, comments=refreshed.comments).phase
+        return refreshed, phase
 
     def _format_failure(self, phase: str, result: CommandResult) -> str:
         stderr = (result.stderr or "").strip()

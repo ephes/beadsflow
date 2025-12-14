@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from typing import assert_never
@@ -10,6 +11,39 @@ from beadsflow.domain.models import Comment, IssueStatus, IssueSummary, Marker
 
 def _priority_sort_key(issue: IssueSummary) -> tuple[int, datetime, str]:
     return (issue.priority, issue.created_at, issue.id)
+
+
+def _normalize_marker_line(line: str) -> str:
+    stripped = line.strip()
+    if stripped.startswith(">"):
+        stripped = stripped.lstrip(">").lstrip()
+    stripped = re.sub(r"^([-*+]|\d+[.)])\s+", "", stripped)
+
+    # Be tolerant of common markdown wrappers around the marker.
+    stripped = re.sub(r"^(\*\*|__|`)([^\s].*?)(\1)(\s|$)", r"\2\4", stripped)
+    for _ in range(3):
+        before = stripped
+        stripped = stripped.strip()
+        if stripped.startswith("**") and stripped.endswith("**") and len(stripped) > 4:
+            stripped = stripped[2:-2]
+        if stripped.startswith("__") and stripped.endswith("__") and len(stripped) > 4:
+            stripped = stripped[2:-2]
+        if stripped.startswith("`") and stripped.endswith("`") and len(stripped) > 2:
+            stripped = stripped[1:-1]
+        if stripped == before:
+            break
+    return stripped.strip()
+
+
+def _marker_from_first_line(first: str) -> Marker | None:
+    lower = first.lower()
+    if lower == "ready for review" or lower.startswith("ready for review:"):
+        return Marker.READY_FOR_REVIEW
+    if first.upper().startswith("LGTM") and (len(first) == 4 or not first[4].isalnum()):
+        return Marker.LGTM
+    if lower == "changes requested" or lower.startswith("changes requested:"):
+        return Marker.CHANGES_REQUESTED
+    return None
 
 
 def select_next_child(
@@ -31,16 +65,12 @@ def select_next_child(
 
 def marker_from_comment(comment: Comment) -> Marker | None:
     for line in comment.text.splitlines():
-        first = line.strip()
+        first = _normalize_marker_line(line)
         if not first:
             continue
-        if first.startswith("Ready for review:"):
-            return Marker.READY_FOR_REVIEW
-        if first == "LGTM" or first.startswith("LGTM "):
-            return Marker.LGTM
-        if first.startswith("Changes requested:"):
-            return Marker.CHANGES_REQUESTED
-        return None
+        marker = _marker_from_first_line(first)
+        if marker is not None:
+            return marker
     return None
 
 

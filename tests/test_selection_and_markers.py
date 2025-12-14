@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from beadsflow.application.phase import Phase
 from beadsflow.application.select import (
     determine_phase_from_comments,
     latest_marker,
+    marker_from_comment,
     select_next_child,
 )
 from beadsflow.domain.models import Comment, IssueStatus, IssueSummary, Marker
@@ -31,6 +34,39 @@ def test_determine_phase_defaults_to_implement() -> None:
 def test_determine_phase_ready_for_review_means_review() -> None:
     comments = [Comment(id=1, author="a", text="Ready for review:", created_at=_dt("2025-01-01T00:00:00"))]
     assert determine_phase_from_comments(comments) is Phase.REVIEW
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Ready for review:", Marker.READY_FOR_REVIEW),
+        ("\n\nReady for review:", Marker.READY_FOR_REVIEW),
+        ("- Ready for review:", Marker.READY_FOR_REVIEW),
+        ("**Ready for review:**", Marker.READY_FOR_REVIEW),
+        ("`Ready for review:`", Marker.READY_FOR_REVIEW),
+        ("LGTM", Marker.LGTM),
+        ("LGTM.", Marker.LGTM),
+        ("- **LGTM**", Marker.LGTM),
+        ("`LGTM`", Marker.LGTM),
+        ("Changes requested: please update", Marker.CHANGES_REQUESTED),
+        ("- Changes requested: please update", Marker.CHANGES_REQUESTED),
+        ("**Changes requested:** please update", Marker.CHANGES_REQUESTED),
+        ("`Changes requested:` please update", Marker.CHANGES_REQUESTED),
+    ],
+)
+def test_marker_from_comment_tolerates_common_markdown(text: str, expected: Marker) -> None:
+    comment = Comment(id=1, author="a", text=text, created_at=_dt("2025-01-01T00:00:00"))
+    assert marker_from_comment(comment) is expected
+
+
+def test_marker_from_comment_finds_marker_not_on_first_line() -> None:
+    comment = Comment(
+        id=1,
+        author="a",
+        text="Some intro text\n\nLGTM\n\nMore details",
+        created_at=_dt("2025-01-01T00:00:00"),
+    )
+    assert marker_from_comment(comment) is Marker.LGTM
 
 
 def test_select_next_child_priority_then_oldest_then_id() -> None:
