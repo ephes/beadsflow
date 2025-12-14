@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 
 from beadsflow.application.run_epic import RunEpicRequest, run_epic
+from beadsflow.application.session import (
+    SessionAttachRequest,
+    SessionRequest,
+    SessionStartRequest,
+    SessionStatusRequest,
+    SessionStopRequest,
+    handle_session,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     session_start = session_subparsers.add_parser("start", help="Start a session")
     session_start.add_argument("name")
     session_start.add_argument("--epic", required=True)
+    session_start.add_argument(
+        "run_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments forwarded to `beadsflow run` (use `--` to separate flags).",
+    )
 
     session_attach = session_subparsers.add_parser("attach", help="Attach to a session")
     session_attach.add_argument("name")
@@ -65,9 +79,30 @@ def _handle_run(args: argparse.Namespace) -> CliResult:
 
 
 def _handle_session(args: argparse.Namespace) -> CliResult:
-    # Placeholder: v0.1 will integrate zellij here.
-    _ = args
-    return CliResult(exit_code=0)
+    request: SessionRequest
+    match args.session_command:
+        case "start":
+            run_args = list(args.run_args)
+            if run_args and run_args[0] == "--":
+                run_args = run_args[1:]
+            request = SessionStartRequest(name=str(args.name), epic_id=str(args.epic), run_args=run_args)
+        case "attach":
+            request = SessionAttachRequest(name=str(args.name))
+        case "stop":
+            request = SessionStopRequest(name=str(args.name))
+        case "status":
+            request = SessionStatusRequest(name=str(args.name))
+        case _:
+            raise AssertionError(f"Unhandled session command: {args.session_command}")
+
+    try:
+        exit_code = handle_session(request)
+        if isinstance(request, SessionStatusRequest):
+            print("running" if exit_code == 0 else "not running")
+        return CliResult(exit_code=exit_code)
+    except Exception as exc:  # noqa: BLE001
+        print(str(exc), file=sys.stderr)
+        return CliResult(exit_code=1)
 
 
 def main(argv: list[str] | None = None) -> int:
