@@ -11,6 +11,10 @@ test:
     uv sync
     uv run pytest
 
+cov:
+    uv sync
+    uv run pytest --cov=beadsflow --cov-report=term-missing --cov-report=html --cov-report=xml
+
 typecheck:
     uv sync
     uv run mypy src tests
@@ -31,4 +35,3 @@ pre-commit:
 docs:
     uv sync --group docs
     uv run sphinx-build -b html docs docs/_build/html
-
