@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import textwrap
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from beadsflow.application.errors import CommandError, ConfigError
 from beadsflow.application.phase import Phase
@@ -111,8 +113,14 @@ class EpicRunLoop:
         self.logger.info(f"Running implementer: {' '.join(argv)}")
         result = self._exec(argv=argv, issue_id=issue_id)
         if result.returncode != 0:
-            self.beads.comment(issue_id, self._format_failure("implementer", result))
-            raise CommandError(f"Implementer failed with code {result.returncode}")
+            log_path = self._write_command_log(issue_id=issue_id, phase="implementer", result=result)
+            failure = self._format_failure("implementer", result, log_path=log_path)
+            self.logger.error(failure)
+            try:
+                self.beads.comment(issue_id, failure)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error(f"Failed to post failure comment to Beads: {exc}")
+            raise CommandError(f"Implementer failed with code {result.returncode} (log: {log_path})")
 
         refreshed, phase = self._wait_for_phase(issue_id=issue_id, expected={Phase.REVIEW})
         if phase is not Phase.REVIEW:
@@ -131,8 +139,14 @@ class EpicRunLoop:
         self.logger.info(f"Running reviewer: {' '.join(argv)}")
         result = self._exec(argv=argv, issue_id=issue_id)
         if result.returncode != 0:
-            self.beads.comment(issue_id, self._format_failure("reviewer", result))
-            raise CommandError(f"Reviewer failed with code {result.returncode}")
+            log_path = self._write_command_log(issue_id=issue_id, phase="reviewer", result=result)
+            failure = self._format_failure("reviewer", result, log_path=log_path)
+            self.logger.error(failure)
+            try:
+                self.beads.comment(issue_id, failure)
+            except Exception as exc:  # noqa: BLE001
+                self.logger.error(f"Failed to post failure comment to Beads: {exc}")
+            raise CommandError(f"Reviewer failed with code {result.returncode} (log: {log_path})")
 
         refreshed, phase = self._wait_for_phase(issue_id=issue_id, expected={Phase.CLOSE, Phase.IMPLEMENT})
         if phase not in {Phase.CLOSE, Phase.IMPLEMENT}:
@@ -164,16 +178,46 @@ class EpicRunLoop:
             phase = determine_next_work(issue_id=refreshed.id, comments=refreshed.comments).phase
         return refreshed, phase
 
-    def _format_failure(self, phase: str, result: CommandResult) -> str:
+    def _format_failure(self, phase: str, result: CommandResult, *, log_path: Path | None = None) -> str:
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()
         excerpt = stderr or stdout
         if len(excerpt) > 1000:
             excerpt = excerpt[:1000] + "…"
         message = f"{phase} command failed (exit {result.returncode})."
+        if log_path is not None:
+            message += f"\n\nLog:\n{log_path}"
         if excerpt:
             message += f"\n\nOutput:\n{excerpt}"
         return message
+
+    def _write_command_log(self, *, issue_id: str, phase: str, result: CommandResult) -> Path:
+        logs_dir = self.repo_paths.beads_dir / "logs" / "beadsflow"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        path = logs_dir / f"{issue_id}.{phase}.{timestamp}.log"
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+        content = "\n".join(
+            [
+                f"phase={phase}",
+                f"issue_id={issue_id}",
+                f"epic_id={self.epic_id}",
+                f"returncode={result.returncode}",
+                "",
+                "argv:",
+                textwrap.indent(" ".join(result.argv), "  "),
+                "",
+                "stdout:",
+                textwrap.indent(stdout.rstrip("\n"), "  "),
+                "",
+                "stderr:",
+                textwrap.indent(stderr.rstrip("\n"), "  "),
+                "",
+            ]
+        )
+        path.write_text(content, encoding="utf-8")
+        return path
 
     def _log_dry_run(self, *, phase: Phase, issue_id: str) -> None:
         if phase is Phase.CLOSE:
