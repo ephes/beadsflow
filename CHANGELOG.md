@@ -6,6 +6,12 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.1.1] - 2025-12-15
+
+### Added
+
+- Write full stdout/stderr logs for failed implementer/reviewer commands under `<beads_dir>/logs/beadsflow/` and include the log path in the failure comment.
+
 ## [0.1.0] - 2025-12-14
 
 ### Added
@@ -21,4 +27,3 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   - `uv` + `uv_build` packaging, `Justfile` workflows.
   - Ruff (lint/format), mypy (typecheck), pytest (+ `just cov` for coverage), pre-commit hooks.
   - Sphinx + MyST docs with ReadTheDocs config.
-
