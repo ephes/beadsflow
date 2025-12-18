@@ -73,7 +73,7 @@ def run_epic(request: RunEpicRequest) -> int:
         if not repo_paths.beads_dir.is_dir():
             raise ConfigError(f"Beads directory not found: {repo_paths.beads_dir}")
 
-        beads_cli = BeadsCli(beads_dir=str(repo_paths.beads_dir))
+        beads_cli = BeadsCli(beads_dir=str(repo_paths.beads_dir), no_db=settings.beads_no_db)
         lock_path = repo_paths.beads_dir / "locks" / f"beadsflow-{request.epic_id}.lock"
 
         with EpicLock(lock_path=lock_path):

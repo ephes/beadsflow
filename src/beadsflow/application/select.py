@@ -63,13 +63,17 @@ def select_next_child(
     return None
 
 
-def marker_from_comment(comment: Comment) -> Marker | None:
-    for line in comment.text.splitlines():
+def marker_from_text(text: str) -> Marker | None:
+    for line in text.splitlines():
         first = _normalize_marker_line(line)
         if not first:
             continue
         return _marker_from_first_line(first)
     return None
+
+
+def marker_from_comment(comment: Comment) -> Marker | None:
+    return marker_from_text(comment.text)
 
 
 def latest_marker(comments: Iterable[Comment]) -> Marker | None:

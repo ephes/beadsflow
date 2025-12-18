@@ -33,6 +33,7 @@ def _parse_issue_type(value: str) -> IssueType:
 @dataclass(frozen=True, slots=True)
 class BeadsCli:
     beads_dir: str
+    no_db: bool = False
 
     def _env(self) -> dict[str, str]:
         env = dict(os.environ)
@@ -40,13 +41,19 @@ class BeadsCli:
         env["BEADS_DIR"] = self.beads_dir
         return env
 
+    def _argv(self, *args: str) -> list[str]:
+        argv = ["bd", "--no-daemon"]
+        if self.no_db:
+            argv.append("--no-db")
+        return [*argv, *args]
+
     @staticmethod
     def _is_db_out_of_sync(stderr: str) -> bool:
         return "Database out of sync with JSONL" in stderr
 
     def _sync_import_only(self) -> None:
         completed = subprocess.run(
-            ["bd", "--no-daemon", "sync", "--import-only"],
+            self._argv("sync", "--import-only"),
             check=False,
             capture_output=True,
             text=True,
@@ -56,7 +63,7 @@ class BeadsCli:
             raise BeadsError(f"bd sync --import-only failed: {completed.stderr.strip()}")
 
     def _run_json(self, *args: str) -> Any:
-        argv = ["bd", "--no-daemon", "--json", *args]
+        argv = self._argv("--json", *args)
         completed = subprocess.run(
             argv,
             check=False,
@@ -92,7 +99,7 @@ class BeadsCli:
         return self._parse_issue(raw)
 
     def comment(self, issue_id: str, text: str) -> None:
-        argv = ["bd", "--no-daemon", "comment", issue_id, text]
+        argv = self._argv("comment", issue_id, text)
         completed = subprocess.run(
             argv,
             check=False,
@@ -115,7 +122,7 @@ class BeadsCli:
                 raise BeadsError(f"bd comment failed: {(completed.stderr or '').strip()}")
 
     def close(self, issue_id: str) -> None:
-        argv = ["bd", "--no-daemon", "close", issue_id]
+        argv = self._argv("close", issue_id)
         completed = subprocess.run(
             argv,
             check=False,

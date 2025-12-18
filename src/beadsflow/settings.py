@@ -13,6 +13,10 @@ from beadsflow.infra.run_command import CommandSpec
 @dataclass(frozen=True, slots=True)
 class Profile:
     command: CommandSpec
+    comment_mode: str
+    comment_prefix: str
+    comment_suffix: str
+    require_git_changes: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +31,7 @@ class RunSettings:
 @dataclass(frozen=True, slots=True)
 class Settings:
     beads_dir: str
+    beads_no_db: bool
     interval_seconds: int
     log_level: str
     implementer: str | None
@@ -39,6 +44,7 @@ class Settings:
     def defaults() -> Settings:
         return Settings(
             beads_dir=".beads",
+            beads_no_db=False,
             interval_seconds=30,
             log_level="info",
             implementer=None,
@@ -61,7 +67,23 @@ def _parse_profile(value: Any) -> Profile:
     command = value.get("command")
     if not isinstance(command, str):
         raise ConfigError("Profile.command must be a string")
-    return Profile(command=CommandSpec.from_string(command))
+    comment_mode = str(value.get("comment_mode", "command"))
+    if comment_mode not in {"command", "stdout"}:
+        raise ConfigError("Profile.comment_mode must be 'command' or 'stdout'")
+    comment_prefix = value.get("comment_prefix", "")
+    if not isinstance(comment_prefix, str):
+        raise ConfigError("Profile.comment_prefix must be a string")
+    comment_suffix = value.get("comment_suffix", "")
+    if not isinstance(comment_suffix, str):
+        raise ConfigError("Profile.comment_suffix must be a string")
+    require_git_changes = bool(value.get("require_git_changes", False))
+    return Profile(
+        command=CommandSpec.from_string(command),
+        comment_mode=comment_mode,
+        comment_prefix=comment_prefix,
+        comment_suffix=comment_suffix,
+        require_git_changes=require_git_changes,
+    )
 
 
 def _parse_run_settings(value: Any, base: RunSettings) -> RunSettings:
@@ -97,6 +119,7 @@ def load_settings(*, config_path: Path | None) -> Settings:
 
     settings = Settings(
         beads_dir=str(raw.get("beads_dir", settings.beads_dir)),
+        beads_no_db=bool(raw.get("beads_no_db", settings.beads_no_db)),
         interval_seconds=int(raw.get("interval_seconds", settings.interval_seconds)),
         log_level=str(raw.get("log_level", settings.log_level)),
         implementer=str(raw.get("implementer")) if raw.get("implementer") is not None else None,
@@ -111,12 +134,18 @@ def load_settings(*, config_path: Path | None) -> Settings:
 
 def apply_env_overrides(settings: Settings) -> Settings:
     beads_dir = os.environ.get("BEADSFLOW_BEADS_DIR", settings.beads_dir)
+    beads_no_db_env = os.environ.get("BEADSFLOW_BEADS_NO_DB")
+    if beads_no_db_env is None:
+        beads_no_db = settings.beads_no_db
+    else:
+        beads_no_db = beads_no_db_env.strip().lower() in {"1", "true", "yes", "on"}
     interval = int(os.environ.get("BEADSFLOW_INTERVAL", str(settings.interval_seconds)))
     implementer = os.environ.get("BEADSFLOW_IMPLEMENTER")
     reviewer = os.environ.get("BEADSFLOW_REVIEWER")
     config_log_level = os.environ.get("BEADSFLOW_LOG_LEVEL")
     return Settings(
         beads_dir=beads_dir,
+        beads_no_db=beads_no_db,
         interval_seconds=interval,
         log_level=config_log_level or settings.log_level,
         implementer=implementer or settings.implementer,
@@ -142,6 +171,7 @@ def apply_cli_overrides(
     _ = quiet
     return Settings(
         beads_dir=beads_dir or settings.beads_dir,
+        beads_no_db=settings.beads_no_db,
         interval_seconds=interval_seconds if interval_seconds is not None else settings.interval_seconds,
         log_level=settings.log_level,
         implementer=implementer or settings.implementer,

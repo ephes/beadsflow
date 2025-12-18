@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 import textwrap
 import time
 from dataclasses import dataclass
@@ -8,12 +10,12 @@ from pathlib import Path
 
 from beadsflow.application.errors import CommandError, ConfigError
 from beadsflow.application.phase import Phase
-from beadsflow.application.select import determine_next_work, select_next_child
-from beadsflow.domain.models import Issue, IssueStatus, IssueType
+from beadsflow.application.select import determine_next_work, marker_from_text, select_next_child
+from beadsflow.domain.models import Issue, IssueStatus, IssueType, Marker
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.infra.run_command import CommandResult, run_command
-from beadsflow.settings import Settings
+from beadsflow.settings import Profile, Settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,59 +104,48 @@ class EpicRunLoop:
         return True
 
     def _run_implementer(self, *, issue_id: str) -> None:
-        implementer_name = self.implementer_name
-        if implementer_name is None:
-            raise ConfigError("No implementer selected (set --implementer or BEADSFLOW_IMPLEMENTER)")
-        implementer = self.settings.implementers.get(implementer_name)
-        if implementer is None:
-            raise ConfigError(f"Unknown implementer profile: {implementer_name}")
-
-        argv = implementer.command.render(epic_id=self.epic_id, issue_id=issue_id)
-        self.logger.info(f"Running implementer: {' '.join(argv)}")
-        result = self._exec(argv=argv, issue_id=issue_id)
-        if result.returncode != 0:
-            log_path = self._write_command_log(issue_id=issue_id, phase="implementer", result=result)
-            failure = self._format_failure("implementer", result, log_path=log_path)
-            self.logger.error(failure)
-            try:
-                self.beads.comment(issue_id, failure)
-            except Exception as exc:  # noqa: BLE001
-                self.logger.error(f"Failed to post failure comment to Beads: {exc}")
-            raise CommandError(f"Implementer failed with code {result.returncode} (log: {log_path})")
-
-        refreshed, phase = self._wait_for_phase(issue_id=issue_id, expected={Phase.REVIEW})
-        if phase is not Phase.REVIEW:
-            self.beads.comment(issue_id, "Implementer completed but did not mark `Ready for review:`; stopping.")
-            raise CommandError("Implementer did not mark Ready for review")
+        implementer = self._require_profile(
+            name=self.implementer_name,
+            kind="implementer",
+            profiles=self.settings.implementers,
+        )
+        before_sig = self._maybe_capture_git_signature(implementer)
+        result = self._run_profile_command(profile=implementer, issue_id=issue_id, phase="implementer")
+        self._ensure_git_changes(profile=implementer, issue_id=issue_id, before_sig=before_sig)
+        self._maybe_comment_from_stdout(
+            profile=implementer,
+            issue_id=issue_id,
+            result=result,
+            expected_markers={Marker.READY_FOR_REVIEW},
+            phase="implementer",
+        )
+        self._ensure_phase(
+            issue_id=issue_id,
+            expected={Phase.REVIEW},
+            failure_comment="Implementer completed but did not mark `Ready for review:`; stopping.",
+            error_message="Implementer did not mark Ready for review",
+        )
 
     def _run_reviewer(self, *, issue_id: str) -> None:
-        reviewer_name = self.reviewer_name
-        if reviewer_name is None:
-            raise ConfigError("No reviewer selected (set --reviewer or BEADSFLOW_REVIEWER)")
-        reviewer = self.settings.reviewers.get(reviewer_name)
-        if reviewer is None:
-            raise ConfigError(f"Unknown reviewer profile: {reviewer_name}")
-
-        argv = reviewer.command.render(epic_id=self.epic_id, issue_id=issue_id)
-        self.logger.info(f"Running reviewer: {' '.join(argv)}")
-        result = self._exec(argv=argv, issue_id=issue_id)
-        if result.returncode != 0:
-            log_path = self._write_command_log(issue_id=issue_id, phase="reviewer", result=result)
-            failure = self._format_failure("reviewer", result, log_path=log_path)
-            self.logger.error(failure)
-            try:
-                self.beads.comment(issue_id, failure)
-            except Exception as exc:  # noqa: BLE001
-                self.logger.error(f"Failed to post failure comment to Beads: {exc}")
-            raise CommandError(f"Reviewer failed with code {result.returncode} (log: {log_path})")
-
-        refreshed, phase = self._wait_for_phase(issue_id=issue_id, expected={Phase.CLOSE, Phase.IMPLEMENT})
-        if phase not in {Phase.CLOSE, Phase.IMPLEMENT}:
-            self.beads.comment(
-                issue_id,
-                "Reviewer completed but did not comment `LGTM` or `Changes requested:`; stopping.",
-            )
-            raise CommandError("Reviewer did not produce expected marker")
+        reviewer = self._require_profile(
+            name=self.reviewer_name,
+            kind="reviewer",
+            profiles=self.settings.reviewers,
+        )
+        result = self._run_profile_command(profile=reviewer, issue_id=issue_id, phase="reviewer")
+        self._maybe_comment_from_stdout(
+            profile=reviewer,
+            issue_id=issue_id,
+            result=result,
+            expected_markers={Marker.LGTM, Marker.CHANGES_REQUESTED},
+            phase="reviewer",
+        )
+        self._ensure_phase(
+            issue_id=issue_id,
+            expected={Phase.CLOSE, Phase.IMPLEMENT},
+            failure_comment="Reviewer completed but did not comment `LGTM` or `Changes requested:`; stopping.",
+            error_message="Reviewer did not produce expected marker",
+        )
 
     def _exec(self, *, argv: list[str], issue_id: str) -> CommandResult:
         return run_command(
@@ -177,6 +168,126 @@ class EpicRunLoop:
             refreshed = self.beads.get_issue(issue_id)
             phase = determine_next_work(issue_id=refreshed.id, comments=refreshed.comments).phase
         return refreshed, phase
+
+    def _require_profile(self, *, name: str | None, kind: str, profiles: dict[str, Profile]) -> Profile:
+        if name is None:
+            raise ConfigError(f"No {kind} selected (set --{kind} or BEADSFLOW_{kind.upper()})")
+        profile = profiles.get(name)
+        if profile is None:
+            raise ConfigError(f"Unknown {kind} profile: {name}")
+        return profile
+
+    def _run_profile_command(self, *, profile: Profile, issue_id: str, phase: str) -> CommandResult:
+        argv = profile.command.render(epic_id=self.epic_id, issue_id=issue_id)
+        self.logger.info(f"Running {phase}: {' '.join(argv)}")
+        result = self._exec(argv=argv, issue_id=issue_id)
+        if result.returncode == 0:
+            return result
+        log_path = self._write_command_log(issue_id=issue_id, phase=phase, result=result)
+        failure = self._format_failure(phase, result, log_path=log_path)
+        self.logger.error(failure)
+        try:
+            self.beads.comment(issue_id, failure)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error(f"Failed to post failure comment to Beads: {exc}")
+        phase_label = phase.capitalize()
+        raise CommandError(f"{phase_label} failed with code {result.returncode} (log: {log_path})")
+
+    def _maybe_capture_git_signature(self, profile: Profile) -> str | None:
+        if not profile.require_git_changes:
+            return None
+        return self._git_signature()
+
+    def _ensure_git_changes(self, *, profile: Profile, issue_id: str, before_sig: str | None) -> None:
+        if not profile.require_git_changes or before_sig is None:
+            return
+        after_sig = self._git_signature()
+        if after_sig != before_sig:
+            return
+        self.beads.comment(
+            issue_id,
+            "Implementer completed but did not produce working-tree changes; stopping.",
+        )
+        raise CommandError("Implementer produced no working-tree changes")
+
+    def _maybe_comment_from_stdout(
+        self,
+        *,
+        profile: Profile,
+        issue_id: str,
+        result: CommandResult,
+        expected_markers: set[Marker],
+        phase: str,
+    ) -> None:
+        if profile.comment_mode != "stdout":
+            return
+        try:
+            self._comment_from_stdout(
+                issue_id=issue_id,
+                result=result,
+                prefix=profile.comment_prefix,
+                suffix=profile.comment_suffix,
+                expected_markers=expected_markers,
+                phase=phase,
+            )
+        except CommandError as exc:
+            self.logger.error(str(exc))
+            try:
+                self.beads.comment(issue_id, str(exc))
+            except Exception as comment_exc:  # noqa: BLE001
+                self.logger.error(f"Failed to post comment to Beads: {comment_exc}")
+            raise
+
+    def _ensure_phase(
+        self,
+        *,
+        issue_id: str,
+        expected: set[Phase],
+        failure_comment: str,
+        error_message: str,
+    ) -> None:
+        _refreshed, phase = self._wait_for_phase(issue_id=issue_id, expected=expected)
+        if phase in expected:
+            return
+        self.beads.comment(issue_id, failure_comment)
+        raise CommandError(error_message)
+
+    def _git_signature(self) -> str:
+        if shutil.which("git") is None:
+            raise CommandError("require_git_changes is enabled but git is not available")
+        completed = subprocess.run(
+            ["git", "status", "--porcelain=v1", "-uall"],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=self.repo_paths.repo_root,
+        )
+        if completed.returncode != 0:
+            stderr = (completed.stderr or "").strip()
+            raise CommandError(f"git status failed: {stderr or 'unknown error'}")
+        return completed.stdout
+
+    def _comment_from_stdout(
+        self,
+        *,
+        issue_id: str,
+        result: CommandResult,
+        prefix: str,
+        suffix: str,
+        expected_markers: set[Marker],
+        phase: str,
+    ) -> None:
+        body = result.stdout or ""
+        excerpt = body.strip()
+        if not excerpt:
+            raise CommandError(f"{phase} produced no stdout to post as a comment")
+        if len(excerpt) > 1000:
+            excerpt = excerpt[:1000] + "…"
+        comment_text = f"{prefix}{body}{suffix}"
+        marker = marker_from_text(comment_text)
+        if marker not in expected_markers:
+            raise CommandError(f"{phase} output missing expected marker.\n\nOutput:\n{excerpt}")
+        self.beads.comment(issue_id, comment_text)
 
     def _format_failure(self, phase: str, result: CommandResult, *, log_path: Path | None = None) -> str:
         stderr = (result.stderr or "").strip()
