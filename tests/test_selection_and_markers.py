@@ -59,14 +59,24 @@ def test_marker_from_comment_tolerates_common_markdown(text: str, expected: Mark
     assert marker_from_comment(comment) is expected
 
 
-def test_marker_from_comment_finds_marker_not_on_first_line() -> None:
+def test_marker_from_comment_ignores_markers_after_first_non_empty_line() -> None:
     comment = Comment(
         id=1,
         author="a",
         text="Some intro text\n\nLGTM\n\nMore details",
         created_at=_dt("2025-01-01T00:00:00"),
     )
-    assert marker_from_comment(comment) is Marker.LGTM
+    assert marker_from_comment(comment) is None
+
+
+def test_marker_from_comment_does_not_match_non_marker_first_line() -> None:
+    comment = Comment(
+        id=1,
+        author="a",
+        text="Not a marker: LGTM|\n\nLGTM",
+        created_at=_dt("2025-01-01T00:00:00"),
+    )
+    assert marker_from_comment(comment) is None
 
 
 def test_select_next_child_priority_then_oldest_then_id() -> None:

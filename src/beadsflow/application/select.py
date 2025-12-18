@@ -68,9 +68,7 @@ def marker_from_comment(comment: Comment) -> Marker | None:
         first = _normalize_marker_line(line)
         if not first:
             continue
-        marker = _marker_from_first_line(first)
-        if marker is not None:
-            return marker
+        return _marker_from_first_line(first)
     return None
 
 
