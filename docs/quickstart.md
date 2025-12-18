@@ -28,6 +28,7 @@ Create `beadsflow.toml` at the repo root:
 
 ```toml
 beads_dir = ".beads"
+beads_no_db = false
 interval_seconds = 30
 log_level = "info"
 implementer = "codex"
@@ -45,6 +46,25 @@ resume_in_progress = true
 selection_strategy = "priority_then_oldest"
 on_command_failure = "stop"
 command_timeout_seconds = 3600
+```
+
+### Profile options (optional)
+
+Each implementer/reviewer profile can customize how comments are posted:
+
+- `comment_mode` (default: `"command"`): `"command"` means your command posts Beads comments itself; `"stdout"` means beadsflow posts the command stdout as the Beads comment.
+- `comment_prefix` / `comment_suffix`: strings appended before/after stdout when `comment_mode = "stdout"`.
+- `require_git_changes` (default: `false`): for implementers, fail the run if the git working tree did not change.
+
+Example (stdout mode):
+
+```toml
+[implementers.codex]
+command = "codex --ask-for-approval never exec ..."
+comment_mode = "stdout"
+comment_prefix = "Ready for review:\\n\\n"
+comment_suffix = "\\n\\nValidation:\\n- uv run pytest"
+require_git_changes = true
 ```
 
 ### Command execution semantics
@@ -114,6 +134,7 @@ Environment overrides (optional):
 export BEADSFLOW_CONFIG="$PWD/beadsflow.toml"
 export BEADSFLOW_IMPLEMENTER=codex
 export BEADSFLOW_REVIEWER=claude
+export BEADSFLOW_BEADS_NO_DB=1  # optional: force --no-db
 ```
 
 **fish**
@@ -121,6 +142,7 @@ export BEADSFLOW_REVIEWER=claude
 set -gx BEADSFLOW_CONFIG "$PWD/beadsflow.toml"
 set -gx BEADSFLOW_IMPLEMENTER codex
 set -gx BEADSFLOW_REVIEWER claude
+set -gx BEADSFLOW_BEADS_NO_DB 1  # optional: force --no-db
 ```
 
 ## Run
