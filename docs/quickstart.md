@@ -55,6 +55,7 @@ Each implementer/reviewer profile can customize how comments are posted:
 - `comment_mode` (default: `"command"`): `"command"` means your command posts Beads comments itself; `"stdout"` means beadsflow posts the command stdout as the Beads comment.
 - `comment_prefix` / `comment_suffix`: strings appended before/after stdout when `comment_mode = "stdout"`.
 - `require_git_changes` (default: `false`): for implementers, fail the run if the git working tree did not change.
+- Stdout comments are truncated by default (800 bytes / 40 lines). Override with `BEADSFLOW_MAX_COMMENT_BYTES` and `BEADSFLOW_MAX_COMMENT_LINES` (set to `0` to disable).
 
 Example (stdout mode):
 

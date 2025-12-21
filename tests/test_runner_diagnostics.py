@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from beadsflow.application.errors import CommandError
-from beadsflow.application.runner import EpicRunLoop
+from beadsflow.application.runner import TRUNCATED_NOTICE, EpicRunLoop, _cap_comment_body
 from beadsflow.domain.models import Comment, Issue, IssueStatus, IssueType
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.infra.run_command import CommandSpec
@@ -253,3 +253,39 @@ def test_runner_rejects_empty_stdout_comment(tmp_path: Path) -> None:
     assert "produced no stdout" in str(excinfo.value)
     assert fake_beads.comments["issue-1"]
     assert "produced no stdout" in fake_beads.comments["issue-1"][0].text
+
+
+def test_cap_comment_body_truncates_by_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BEADSFLOW_MAX_COMMENT_LINES", "2")
+    monkeypatch.setenv("BEADSFLOW_MAX_COMMENT_BYTES", "0")
+
+    body = "line-1\nline-2\nline-3\n"
+    capped = _cap_comment_body(body=body, prefix="", suffix="")
+
+    assert capped.startswith("line-1\nline-2\n")
+    assert "line-3" not in capped
+    assert TRUNCATED_NOTICE.strip() in capped
+
+
+def test_cap_comment_body_truncates_by_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BEADSFLOW_MAX_COMMENT_LINES", "0")
+    monkeypatch.setenv("BEADSFLOW_MAX_COMMENT_BYTES", "60")
+
+    prefix = "Ready for review:\n"
+    suffix = "\nValidation:\n- uv run pytest"
+    body = "A" * 200
+    capped = _cap_comment_body(body=body, prefix=prefix, suffix=suffix)
+
+    comment_text = f"{prefix}{capped}{suffix}"
+    assert len(comment_text.encode("utf-8")) <= 60
+    assert TRUNCATED_NOTICE.strip() in capped
+
+
+def test_cap_comment_body_no_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BEADSFLOW_MAX_COMMENT_LINES", "0")
+    monkeypatch.setenv("BEADSFLOW_MAX_COMMENT_BYTES", "0")
+
+    body = "line-1\nline-2\n"
+    capped = _cap_comment_body(body=body, prefix="pre-", suffix="-suf")
+
+    assert capped == body

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import textwrap
@@ -16,6 +17,60 @@ from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.infra.run_command import CommandResult, run_command
 from beadsflow.settings import Profile, Settings
+
+DEFAULT_MAX_COMMENT_BYTES = 800
+DEFAULT_MAX_COMMENT_LINES = 40
+TRUNCATED_NOTICE = "\n\n[truncated]\n"
+
+
+def _env_limit(name: str, default: int) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return default
+    if value <= 0:
+        return None
+    return value
+
+
+def _truncate_utf8(text: str, max_bytes: int) -> str:
+    if max_bytes <= 0:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _cap_comment_body(*, body: str, prefix: str, suffix: str) -> str:
+    max_lines = _env_limit("BEADSFLOW_MAX_COMMENT_LINES", DEFAULT_MAX_COMMENT_LINES)
+    max_bytes = _env_limit("BEADSFLOW_MAX_COMMENT_BYTES", DEFAULT_MAX_COMMENT_BYTES)
+    truncated = False
+
+    if max_lines is not None:
+        lines = body.splitlines(keepends=True)
+        if len(lines) > max_lines:
+            body = "".join(lines[:max_lines])
+            truncated = True
+
+    if max_bytes is not None:
+        max_body_bytes = max_bytes - len(prefix.encode("utf-8")) - len(suffix.encode("utf-8"))
+        if max_body_bytes < 0:
+            max_body_bytes = 0
+        if len(body.encode("utf-8")) > max_body_bytes:
+            truncated = True
+            body = _truncate_utf8(body, max_body_bytes)
+        if truncated:
+            max_body_bytes = max(0, max_body_bytes - len(TRUNCATED_NOTICE.encode("utf-8")))
+            body = _truncate_utf8(body, max_body_bytes)
+
+    if truncated:
+        body = body.rstrip("\n") + TRUNCATED_NOTICE
+
+    return body
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +338,7 @@ class EpicRunLoop:
             raise CommandError(f"{phase} produced no stdout to post as a comment")
         if len(excerpt) > 1000:
             excerpt = excerpt[:1000] + "…"
+        body = _cap_comment_body(body=body, prefix=prefix, suffix=suffix)
         comment_text = f"{prefix}{body}{suffix}"
         marker = marker_from_text(comment_text)
         if marker not in expected_markers:

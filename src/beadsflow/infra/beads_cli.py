@@ -154,7 +154,8 @@ class BeadsCli:
                 id=str(child["id"]),
                 title=str(child["title"]),
                 status=_parse_status(str(child["status"])),
-                priority=int(child["priority"]),
+                # Beads omits priority for default P0; treat missing as 0.
+                priority=int(child.get("priority", 0)),
                 created_at=_parse_datetime(str(child["created_at"])),
             )
             for child in raw.get("dependents", [])
@@ -172,7 +173,8 @@ class BeadsCli:
             id=str(raw["id"]),
             title=str(raw["title"]),
             status=_parse_status(str(raw["status"])),
-            priority=int(raw["priority"]),
+            # Beads omits priority for default P0; treat missing as 0.
+            priority=int(raw.get("priority", 0)),
             issue_type=_parse_issue_type(str(raw["issue_type"])),
             created_at=_parse_datetime(str(raw["created_at"])),
             updated_at=_parse_datetime(str(raw["updated_at"])),
