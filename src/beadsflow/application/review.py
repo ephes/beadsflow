@@ -130,7 +130,8 @@ def _build_prompt(
         Checklist:
         - Use the issue context and latest Ready for review comment below.
         - Review the git diff for correctness, edge cases, and maintainability.
-        - If a Validation section says "(run by reviewer)", do not request changes for missing results; call out that validation is pending.
+        - If a Validation section says "(run by reviewer)", do not request changes for
+          missing results; call out that validation is pending.
 
         Issue:
         Title: {issue.title}
@@ -156,8 +157,11 @@ def _build_prompt(
         Git diff (patch, truncated):
         {diff_patch}
 
-        Respond with a single Beads comment. The first non-empty line must be exactly LGTM or start with Changes requested:. Do not wrap that marker in markdown/backticks.
-        Keep the comment concise; if you have more to say, summarize and ask for a follow-up issue instead of writing a long comment.
+        Respond with a single Beads comment. The first non-empty line must be exactly
+        LGTM or start with Changes requested:. Do not wrap that marker in
+        markdown/backticks.
+        Keep the comment concise; if you have more to say, summarize and ask for a
+        follow-up issue instead of writing a long comment.
         """
     ).strip()
 
@@ -267,12 +271,7 @@ def resolve_review_request(
     resolved_epic = epic_id or os.environ.get("BEADSFLOW_EPIC_ID")
     if not resolved_epic:
         raise CommandError("Missing epic id (set --epic-id or BEADSFLOW_EPIC_ID)")
-    resolved_beads_dir = (
-        beads_dir
-        or os.environ.get("BEADSFLOW_BEADS_DIR")
-        or os.environ.get("BEADS_DIR")
-        or ".beads"
-    )
+    resolved_beads_dir = beads_dir or os.environ.get("BEADSFLOW_BEADS_DIR") or os.environ.get("BEADS_DIR") or ".beads"
     if not beads_no_db:
         raw_no_db = os.environ.get("BEADSFLOW_BEADS_NO_DB") or os.environ.get("BEADS_NO_DB")
         if raw_no_db and raw_no_db.strip().lower() in {"1", "true", "yes", "on"}:
