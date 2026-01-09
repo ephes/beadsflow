@@ -34,7 +34,7 @@ def test_truncate_with_notice_no_truncation() -> None:
 
 
 def test_truncate_with_notice_adds_notice() -> None:
-    text = "abcdef"
+    text = "abcdefghijklmnopqrstuvwxyz"
     max_bytes = len(TRUNCATED_NOTICE.encode("utf-8")) + 2
     truncated = _truncate_with_notice(text, max_bytes)
     assert truncated.startswith("ab")
