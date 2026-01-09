@@ -42,15 +42,8 @@ bd --no-daemon comment "$issue" "$comment_text"
 '"""
 
 [reviewers.claude]
-command = """bash -lc 'set -euo pipefail
-issue="$BEADSFLOW_ISSUE_ID"
-epic="$BEADSFLOW_EPIC_ID"
-
-bd --no-daemon sync --import-only >/dev/null 2>&1 || true
-out="$(claude -p "Review bead ${issue} under epic ${epic}. Review the repo state and changes. Respond with a Beads comment. The first non-empty line must be exactly LGTM or start with Changes requested:. Do not wrap that marker in markdown/backticks.")"
-
-bd --no-daemon comment "$issue" "$out"
-'"""
+command = "beadsflow review --cli claude"
+comment_mode = "stdout"
 
 [run]
 max_iterations = 500

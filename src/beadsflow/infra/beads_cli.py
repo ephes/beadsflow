@@ -181,4 +181,6 @@ class BeadsCli:
             dependencies=dependencies,
             dependents=dependents,
             comments=comments,
+            description=str(raw.get("description", "")),
+            acceptance_criteria=str(raw.get("acceptance_criteria", "")),
         )

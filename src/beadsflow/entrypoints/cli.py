@@ -4,6 +4,7 @@ import argparse
 import sys
 from dataclasses import dataclass
 
+from beadsflow.application.review import resolve_review_request, run_review
 from beadsflow.application.run_epic import RunEpicRequest, run_epic
 from beadsflow.application.session import (
     SessionAttachRequest,
@@ -36,6 +37,16 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--max-iterations", type=int, default=None, help="Safety cap for iterations")
     run_parser.add_argument("--verbose", action="store_true")
     run_parser.add_argument("--quiet", action="store_true")
+
+    review_parser = subparsers.add_parser("review", help="Generate a reviewer comment on stdout")
+    review_parser.add_argument("--issue-id", default=None)
+    review_parser.add_argument("--epic-id", default=None)
+    review_parser.add_argument("--beads-dir", default=None)
+    review_parser.add_argument("--beads-no-db", action="store_true")
+    review_parser.add_argument("--cli", default="claude")
+    review_parser.add_argument("--prompt-arg", default="-p")
+    review_parser.add_argument("--diff-max-bytes", type=int, default=None)
+    review_parser.add_argument("--comment-max-bytes", type=int, default=None)
 
     session_parser = subparsers.add_parser("session", help="Manage a zellij session for an epic run")
     session_subparsers = session_parser.add_subparsers(dest="session_command", required=True)
@@ -100,6 +111,26 @@ def _handle_session(args: argparse.Namespace) -> CliResult:
         return CliResult(exit_code=1)
 
 
+def _handle_review(args: argparse.Namespace) -> CliResult:
+    try:
+        request = resolve_review_request(
+            issue_id=args.issue_id,
+            epic_id=args.epic_id,
+            beads_dir=args.beads_dir,
+            beads_no_db=args.beads_no_db,
+            cli_command=args.cli,
+            prompt_arg=args.prompt_arg,
+            diff_max_bytes=args.diff_max_bytes,
+            comment_max_bytes=args.comment_max_bytes,
+        )
+        comment = run_review(request)
+        print(comment)
+        return CliResult(exit_code=0)
+    except Exception as exc:  # noqa: BLE001
+        print(str(exc), file=sys.stderr)
+        return CliResult(exit_code=1)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     argv = sys.argv[1:] if argv is None else argv
@@ -114,6 +145,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         return _handle_run(args).exit_code
+
+    if args.command == "review":
+        return _handle_review(args).exit_code
 
     if args.command == "session":
         return _handle_session(args).exit_code

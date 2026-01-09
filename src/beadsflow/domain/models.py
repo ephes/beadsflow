@@ -61,3 +61,5 @@ class Issue:
     dependencies: list[Dependency]
     dependents: list[IssueSummary]
     comments: list[Comment]
+    description: str = ""
+    acceptance_criteria: str = ""

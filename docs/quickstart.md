@@ -38,7 +38,8 @@ reviewer = "claude"
 command = "codex"
 
 [reviewers.claude]
-command = "claude"
+command = "beadsflow review --cli claude"
+comment_mode = "stdout"
 
 [run]
 max_iterations = 500
@@ -67,6 +68,21 @@ comment_prefix = "Ready for review:\\n\\n"
 comment_suffix = "\\n\\nValidation:\\n- uv run pytest"
 require_git_changes = true
 ```
+
+### Built-in reviewer helper (optional)
+
+`beadsflow review` is a small helper that gathers issue context, the latest Ready for review comment, and git status/diff,
+then asks a local CLI (default: `claude -p`) to produce a review comment. It prints the comment to stdout so you can use
+`comment_mode = "stdout"`.
+
+```toml
+[reviewers.claude]
+command = "beadsflow review --cli claude"
+comment_mode = "stdout"
+```
+
+`--cli` is parsed with `shlex.split(...)`, so you can pass a full command (e.g., `--cli "claude --model opus"`).
+Use `--prompt-arg` to match the flag your CLI uses to receive the prompt (default: `-p`).
 
 ### Command execution semantics
 
