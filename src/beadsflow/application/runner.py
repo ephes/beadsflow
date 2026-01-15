@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shutil
@@ -310,16 +311,26 @@ class EpicRunLoop:
     def _git_signature(self) -> str:
         if shutil.which("git") is None:
             raise CommandError("require_git_changes is enabled but git is not available")
+        status = self._git_capture(["git", "status", "--porcelain=v1", "-uall"], allow_exit={0})
+        diff = self._git_capture(["git", "diff", "--binary"], allow_exit={0, 1})
+        staged = self._git_capture(["git", "diff", "--binary", "--cached"], allow_exit={0, 1})
+        digest = hashlib.sha256()
+        digest.update(diff.encode("utf-8", errors="replace"))
+        digest.update(b"\0")
+        digest.update(staged.encode("utf-8", errors="replace"))
+        return f"{status}\n# diff-sha256={digest.hexdigest()}\n"
+
+    def _git_capture(self, argv: list[str], *, allow_exit: set[int]) -> str:
         completed = subprocess.run(
-            ["git", "status", "--porcelain=v1", "-uall"],
+            argv,
             check=False,
             capture_output=True,
             text=True,
             cwd=self.repo_paths.repo_root,
         )
-        if completed.returncode != 0:
+        if completed.returncode not in allow_exit:
             stderr = (completed.stderr or "").strip()
-            raise CommandError(f"git status failed: {stderr or 'unknown error'}")
+            raise CommandError(f"{' '.join(argv)} failed: {stderr or 'unknown error'}")
         return completed.stdout
 
     def _comment_from_stdout(
