@@ -56,3 +56,30 @@ def test_beads_cli_auto_imports_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) 
 
     assert show_calls == 2
     assert any(argv[:3] == ["bd", "--no-daemon", "sync"] for argv in calls)
+
+
+def test_beads_cli_comment_retries_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) -> None:
+    import beadsflow.infra.beads_cli as beads_cli_mod
+
+    calls: list[list[str]] = []
+    comment_calls = 0
+
+    def run(argv: list[str], **kwargs: object) -> _Completed:
+        nonlocal comment_calls
+        calls.append(argv)
+        if argv[:4] == ["bd", "--no-daemon", "comments", "add"]:
+            comment_calls += 1
+            if comment_calls == 1:
+                return _Completed(returncode=1, stderr="Error: Database out of sync with JSONL.")
+            return _Completed(returncode=0)
+        if argv[:3] == ["bd", "--no-daemon", "sync"] and "--import-only" in argv:
+            return _Completed(returncode=0)
+        raise AssertionError(f"Unexpected argv: {argv}")
+
+    monkeypatch.setattr(beads_cli_mod.subprocess, "run", run)
+
+    cli = BeadsCli(beads_dir=".beads")
+    cli.comment("beadsflow-2", "hello")
+
+    assert comment_calls == 2
+    assert any(argv[:3] == ["bd", "--no-daemon", "sync"] for argv in calls)

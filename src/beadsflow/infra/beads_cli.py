@@ -99,7 +99,7 @@ class BeadsCli:
         return self._parse_issue(raw)
 
     def comment(self, issue_id: str, text: str) -> None:
-        argv = self._argv("comment", issue_id, text)
+        argv = self._argv("comments", "add", issue_id, text)
         completed = subprocess.run(
             argv,
             check=False,
@@ -119,7 +119,7 @@ class BeadsCli:
                     env=self._env(),
                 )
             if completed.returncode != 0:
-                raise BeadsError(f"bd comment failed: {(completed.stderr or '').strip()}")
+                raise BeadsError(f"bd comments add failed: {(completed.stderr or '').strip()}")
 
     def close(self, issue_id: str) -> None:
         argv = self._argv("close", issue_id)

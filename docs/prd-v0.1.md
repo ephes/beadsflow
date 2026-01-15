@@ -232,7 +232,7 @@ Recommended data flow (v0.1):
 - Use `bd ... --json` where available for machine parsing.
 - Use `bd show <id>` to load epic metadata and enumerate children.
 - Use `bd dep tree <epic-id>` (or per-child dependency inspection) to determine readiness ordering.
-- Use `bd comment <id> ...` to post coordination markers and results.
+- Use `bd comments add <id> ...` to post coordination markers and results.
 - Use `bd update <id> ...` / `bd close <id>` / `bd reopen <id>` as needed for lifecycle transitions (exact policy is part of the implementer/reviewer protocol).
 
 ## Implementer/reviewer protocol (v0.1)
