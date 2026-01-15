@@ -50,6 +50,9 @@ def test_truncate_with_notice_adds_notice() -> None:
         ("LGTM!", True),
         ("LGTM123", False),
         ("lgtm", True),
+        ("**LGTM**", True),
+        ("`LGTM`", True),
+        ("- LGTM", True),
         ("Looks good", False),
     ],
 )
@@ -65,6 +68,8 @@ def test_is_lgtm_line(line: str, expected: bool) -> None:
         ("Changes requested: fix this", True),
         ("Changes requested - fix this", False),
         ("changes requested", True),
+        ("**Changes requested:** fix this", True),
+        ("- Changes requested: fix this", True),
         ("Needs work", False),
     ],
 )
@@ -81,6 +86,11 @@ def test_ensure_marker_keeps_first_marker_line() -> None:
     assert _ensure_marker(output) == output
 
 
+def test_ensure_marker_keeps_first_marker_line_with_markdown() -> None:
+    output = "**LGTM**\n\nLooks good"
+    assert _ensure_marker(output) == output
+
+
 def test_ensure_marker_trims_leading_blank_lines() -> None:
     output = "\n\nLGTM\nAll good"
     assert _ensure_marker(output) == "LGTM\nAll good"
@@ -89,6 +99,12 @@ def test_ensure_marker_trims_leading_blank_lines() -> None:
 def test_ensure_marker_prepends_marker_from_later_line() -> None:
     output = "Looks good\n\nLGTM\nMore details"
     expected = "LGTM\n\nLooks good\n\nLGTM\nMore details"
+    assert _ensure_marker(output) == expected
+
+
+def test_ensure_marker_prepends_marker_from_later_line_with_markdown() -> None:
+    output = "Looks good\n\n**LGTM**\nMore details"
+    expected = "LGTM\n\nLooks good\n\n**LGTM**\nMore details"
     assert _ensure_marker(output) == expected
 
 

@@ -8,7 +8,7 @@ import textwrap
 from dataclasses import dataclass
 
 from beadsflow.application.errors import CommandError
-from beadsflow.application.select import marker_from_comment
+from beadsflow.application.select import _normalize_marker_line, marker_from_comment
 from beadsflow.domain.models import Comment, Issue, Marker
 from beadsflow.infra.beads_cli import BeadsCli
 
@@ -186,19 +186,19 @@ def _run_reviewer_command(*, cli_command: str, prompt_arg: str, prompt: str) -> 
 
 
 def _is_lgtm_line(line: str) -> bool:
-    stripped = line.strip()
-    if not stripped:
+    normalized = _normalize_marker_line(line)
+    if not normalized:
         return False
-    if not stripped.upper().startswith("LGTM"):
+    if not normalized.upper().startswith("LGTM"):
         return False
-    return len(stripped) == 4 or not stripped[4].isalnum()
+    return len(normalized) == 4 or not normalized[4].isalnum()
 
 
 def _is_changes_requested_line(line: str) -> bool:
-    stripped = line.strip()
-    if not stripped:
+    normalized = _normalize_marker_line(line)
+    if not normalized:
         return False
-    lower = stripped.lower()
+    lower = normalized.lower()
     return lower == "changes requested" or lower.startswith("changes requested:")
 
 
