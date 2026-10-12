@@ -349,9 +349,12 @@ class EpicRunLoop:
             raise CommandError(f"{phase} produced no stdout to post as a comment")
         if len(excerpt) > 1000:
             excerpt = excerpt[:1000] + "…"
+        original_marker = marker_from_text(f"{prefix}{body}{suffix}")
         body = _cap_comment_body(body=body, prefix=prefix, suffix=suffix)
         comment_text = f"{prefix}{body}{suffix}"
         marker = marker_from_text(comment_text)
+        if marker is not original_marker:
+            raise CommandError(f"{phase} comment truncation changed verdict")
         if marker not in expected_markers:
             raise CommandError(f"{phase} output missing expected marker.\n\nOutput:\n{excerpt}")
         self.beads.comment(issue_id, comment_text)

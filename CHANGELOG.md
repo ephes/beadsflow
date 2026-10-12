@@ -14,6 +14,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Fail closed on quoted, malformed, later-body, or conflicting review approvals in helper output and comment ingestion.
+
 - Treat missing Beads `priority` values as P0 (0) instead of raising `KeyError`.
 
 ## [0.1.1] - 2025-12-15

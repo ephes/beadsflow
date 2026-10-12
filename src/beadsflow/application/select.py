@@ -39,7 +39,7 @@ def _marker_from_first_line(first: str) -> Marker | None:
     lower = first.lower()
     if lower == "ready for review" or lower.startswith("ready for review:"):
         return Marker.READY_FOR_REVIEW
-    if first.upper().startswith("LGTM") and (len(first) == 4 or not first[4].isalnum()):
+    if first == "LGTM":
         return Marker.LGTM
     if lower == "changes requested" or lower.startswith("changes requested:"):
         return Marker.CHANGES_REQUESTED
@@ -64,12 +64,20 @@ def select_next_child(
 
 
 def marker_from_text(text: str) -> Marker | None:
-    for line in text.splitlines():
-        first = _normalize_marker_line(line)
-        if not first:
-            continue
-        return _marker_from_first_line(first)
-    return None
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return None
+    first = lines[0]
+    if first == "LGTM":
+        # Even quoted or fenced change requests make an approval ambiguous.
+        if any(
+            _marker_from_first_line(_normalize_marker_line(line)) is Marker.CHANGES_REQUESTED for line in lines[1:]
+        ):
+            return Marker.CHANGES_REQUESTED
+        return Marker.LGTM
+    marker = _marker_from_first_line(_normalize_marker_line(first))
+    # Markdown tolerance is only for non-approval coordination markers.
+    return None if marker is Marker.LGTM else marker
 
 
 def marker_from_comment(comment: Comment) -> Marker | None:

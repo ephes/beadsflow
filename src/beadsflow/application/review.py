@@ -8,7 +8,7 @@ import textwrap
 from dataclasses import dataclass
 
 from beadsflow.application.errors import CommandError
-from beadsflow.application.select import _normalize_marker_line, marker_from_comment
+from beadsflow.application.select import marker_from_comment, marker_from_text
 from beadsflow.domain.models import Comment, Issue, Marker
 from beadsflow.infra.beads_cli import BeadsCli
 
@@ -185,49 +185,15 @@ def _run_reviewer_command(*, cli_command: str, prompt_arg: str, prompt: str) -> 
     return completed.stdout or ""
 
 
-def _is_lgtm_line(line: str) -> bool:
-    normalized = _normalize_marker_line(line)
-    if not normalized:
-        return False
-    if not normalized.upper().startswith("LGTM"):
-        return False
-    return len(normalized) == 4 or not normalized[4].isalnum()
-
-
-def _is_changes_requested_line(line: str) -> bool:
-    normalized = _normalize_marker_line(line)
-    if not normalized:
-        return False
-    lower = normalized.lower()
-    return lower == "changes requested" or lower.startswith("changes requested:")
-
-
 def _ensure_marker(output: str) -> str:
     body = output.strip()
     if not body:
         return "Changes requested:\n\n(no review output)"
-    lines = body.splitlines()
-    for line in lines:
-        if not line.strip():
-            continue
-        if _is_lgtm_line(line) or _is_changes_requested_line(line):
-            first_line = line.strip()
-            if lines[0].strip() == first_line:
-                return body
-            return f"{first_line}\n\n{body}"
-        break
-
-    marker = None
-    for line in lines:
-        if _is_lgtm_line(line):
-            marker = "LGTM"
-            break
-        if _is_changes_requested_line(line):
-            marker = "Changes requested:"
-            break
-    if marker is None:
-        marker = "Changes requested:"
-    return f"{marker}\n\n{body}"
+    if marker_from_text(body) in {Marker.LGTM, Marker.CHANGES_REQUESTED}:
+        if body.splitlines()[0].strip() == "LGTM" and marker_from_text(body) is Marker.CHANGES_REQUESTED:
+            return f"Changes requested:\n\n{body}"
+        return body
+    return f"Changes requested:\n\n{body}"
 
 
 def run_review(request: ReviewRequest) -> str:

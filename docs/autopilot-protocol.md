@@ -4,6 +4,8 @@
 
 ## Coordination markers
 
+Approval requires exactly `LGTM` on the first nonempty line (surrounding whitespace is allowed). Quotes, bullets, Markdown wrappers, punctuation, lowercase variants, and later body approvals do not approve. An approval containing a `Changes requested:` verdict anywhere, including quoted examples, requests changes conservatively. The standalone helper preserves invalid output as diagnostics beneath `Changes requested:`. Non-approval coordination markers retain Markdown tolerance. Runner stdout comments are classified before and after truncation; if truncation changes the verdict, posting fails.
+
 Use these exact markers as the first non-empty line of a comment:
 
 - `Ready for review:` — implementer signals “I’m done, please review”.
