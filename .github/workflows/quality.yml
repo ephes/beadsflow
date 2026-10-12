@@ -1,0 +1,33 @@
+name: Quality
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.13.0"
+          python-version: "3.11"
+      - name: Install locked dependencies
+        run: uv sync --frozen
+      - name: Activate installed tools
+        run: echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+      - name: Ruff lint
+        run: .venv/bin/ruff check .
+      - name: Ruff format
+        run: .venv/bin/ruff format --check .
+      - name: Types
+        run: .venv/bin/mypy src tests
+      - name: Tests
+        run: .venv/bin/pytest
