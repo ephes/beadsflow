@@ -15,6 +15,7 @@ from beadsflow.application.phase import Phase
 from beadsflow.application.select import determine_next_work, marker_from_text, select_next_child
 from beadsflow.domain.models import Issue, IssueStatus, IssueType, Marker
 from beadsflow.infra.beads_cli import BeadsCli
+from beadsflow.infra.git_signature import untracked_signature
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.infra.run_command import CommandResult, run_command
 from beadsflow.settings import Profile, Settings
@@ -314,10 +315,17 @@ class EpicRunLoop:
         status = self._git_capture(["git", "status", "--porcelain=v1", "-uall"], allow_exit={0})
         diff = self._git_capture(["git", "diff", "--binary"], allow_exit={0, 1})
         staged = self._git_capture(["git", "diff", "--binary", "--cached"], allow_exit={0, 1})
+        head = self._git_capture(["git", "rev-parse", "--verify", "--quiet", "HEAD"], allow_exit={0, 1})
+        untracked = self._git_capture(["git", "ls-files", "--others", "--exclude-standard", "-z"], allow_exit={0})
         digest = hashlib.sha256()
-        digest.update(diff.encode("utf-8", errors="replace"))
+        digest.update(head.encode("utf-8", errors="surrogateescape"))
+        for relative in sorted(filter(None, untracked.split("\0"))):
+            digest.update(b"\0" + os.fsencode(relative) + b"\0")
+            digest.update(untracked_signature(self.repo_paths.repo_root, relative))
         digest.update(b"\0")
-        digest.update(staged.encode("utf-8", errors="replace"))
+        digest.update(diff.encode("utf-8", errors="surrogateescape"))
+        digest.update(b"\0")
+        digest.update(staged.encode("utf-8", errors="surrogateescape"))
         return f"{status}\n# diff-sha256={digest.hexdigest()}\n"
 
     def _git_capture(self, argv: list[str], *, allow_exit: set[int]) -> str:
@@ -325,13 +333,13 @@ class EpicRunLoop:
             argv,
             check=False,
             capture_output=True,
-            text=True,
             cwd=self.repo_paths.repo_root,
         )
         if completed.returncode not in allow_exit:
-            stderr = (completed.stderr or "").strip()
+            stderr = completed.stderr.decode("utf-8", errors="replace").strip()
             raise CommandError(f"{' '.join(argv)} failed: {stderr or 'unknown error'}")
-        return completed.stdout
+        # Decode bytes directly: text mode would translate "\r" in paths and patches to "\n".
+        return completed.stdout.decode("utf-8", errors="surrogateescape")
 
     def _comment_from_stdout(
         self,

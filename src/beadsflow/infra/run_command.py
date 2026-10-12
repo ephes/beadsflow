@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import signal
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -41,32 +42,67 @@ def run_command(
     timeout_seconds: int,
     env: dict[str, str],
 ) -> CommandResult:
+    process = subprocess.Popen(
+        list(argv),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        start_new_session=True,
+        env={**os.environ, **env},
+    )
     try:
-        completed = subprocess.run(
-            list(argv),
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            env={**os.environ, **env},
-        )
-        return CommandResult(
-            argv=argv,
-            returncode=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-        )
-    except subprocess.TimeoutExpired as exc:
-        stdout: str
-        stderr: str
-        if isinstance(exc.stdout, bytes):
-            stdout = exc.stdout.decode(errors="replace")
-        else:
-            stdout = exc.stdout or ""
-        if isinstance(exc.stderr, bytes):
-            stderr = exc.stderr.decode(errors="replace")
-        else:
-            stderr = exc.stderr or ""
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        stdout, stderr = _stop_group(process)
         if not stderr:
             stderr = f"Timed out after {timeout_seconds} seconds."
         return CommandResult(argv=argv, returncode=124, stdout=stdout, stderr=stderr)
+    except BaseException:
+        _stop_group(process)
+        raise
+    return CommandResult(argv=argv, returncode=process.returncode, stdout=stdout, stderr=stderr)
+
+
+def _signal_group(process: subprocess.Popen[str], sig: signal.Signals) -> None:
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # macOS can reject signalling a group containing only a zombie leader.
+        if process.poll() is None:
+            raise
+
+
+def _stop_group(process: subprocess.Popen[str]) -> tuple[str, str]:
+    # Give wrappers a short opportunity to reap their children, then kill any
+    # remaining group members even when the wrapper has already exited.
+    _signal_group(process, signal.SIGTERM)
+    try:
+        try:
+            return process.communicate(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            _signal_group(process, signal.SIGKILL)
+            try:
+                return process.communicate(timeout=0.5)
+            except subprocess.TimeoutExpired as exc:
+                # Escaped descendants may retain pipe handles. Preserve captured
+                # output without waiting indefinitely for their EOF.
+                return _timeout_output(exc)
+    finally:
+        try:
+            _signal_group(process, signal.SIGKILL)
+        finally:
+            process.wait()
+            if process.stdout is not None:
+                process.stdout.close()
+            if process.stderr is not None:
+                process.stderr.close()
+
+
+def _timeout_output(exc: subprocess.TimeoutExpired) -> tuple[str, str]:
+    def decode(value: str | bytes | None) -> str:
+        return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+
+    return decode(exc.stdout), decode(exc.stderr)
