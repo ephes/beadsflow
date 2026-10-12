@@ -34,6 +34,7 @@ def loop(tmp_path: Path) -> EpicRunLoop:
 def test_untracked_content_and_mode(loop: EpicRunLoop) -> None:
     path = loop.repo_paths.repo_root / "untracked\n name"
     path.write_bytes(b"first")
+    path.chmod(0o644)  # Explicit start mode: the result must not depend on the umask.
     before = loop._git_signature()
     assert loop._git_signature() == before
     path.write_bytes(b"second")
@@ -99,6 +100,9 @@ def test_nested_repository_and_fifo(loop: EpicRunLoop) -> None:
     git(nested, "init")
     fifo = root / "fifo"
     os.mkfifo(fifo)
+    # Explicit start modes: the mode changes below must not depend on the umask.
+    nested.chmod(0o755)
+    fifo.chmod(0o644)
     before = loop._git_signature()
     assert loop._git_signature() == before
     nested.chmod(0o700)
