@@ -5,7 +5,7 @@ import pytest
 
 from beadsflow.application.errors import LockError
 from beadsflow.infra import locking
-from beadsflow.infra.locking import EpicLock
+from beadsflow.infra.locking import EpicLock, epic_lock_path
 
 
 def test_symlink_file_refused(tmp_path: Path) -> None:
@@ -93,3 +93,35 @@ def test_trusted_ancestor_alias_allowed(tmp_path: Path) -> None:
     alias.symlink_to(repo, target_is_directory=True)
     with EpicLock(alias / ".beads" / "locks" / "lock"):
         assert (repo / ".beads" / "locks" / "lock").read_text().startswith("pid=")
+
+
+@pytest.mark.parametrize("epic_id", ["beadsflow-1", "bd-a3f8.1", "Epic_42", "7"])
+def test_epic_lock_path_accepts_plain_ids(tmp_path: Path, epic_id: str) -> None:
+    path = epic_lock_path(tmp_path, epic_id)
+    assert path == tmp_path / "locks" / f"beadsflow-{epic_id}.lock"
+    assert path.parent.parent == tmp_path
+
+
+@pytest.mark.parametrize(
+    "epic_id",
+    [
+        "",
+        ".",
+        "..",
+        ".hidden",
+        "-flag",
+        "a/b",
+        "../escape",
+        "x/../../escape",
+        "/abs",
+        "a\\b",
+        "a b",
+        "a\x00b",
+        "a\n",
+        "épic",
+    ],
+)
+def test_epic_lock_path_refuses_unsafe_ids(tmp_path: Path, epic_id: str) -> None:
+    with pytest.raises(LockError, match="Refusing epic ID"):
+        epic_lock_path(tmp_path, epic_id)
+    assert list(tmp_path.iterdir()) == []

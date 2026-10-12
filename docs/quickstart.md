@@ -187,7 +187,7 @@ uv run beadsflow run <epic-id> --interval 30
 Notes:
 
 - `beadsflow` uses `bd --no-daemon` semantics and sets `BEADS_NO_DAEMON=1` and `BEADS_DIR=...` for internal `bd` calls.
-- Concurrency: run one epic per workspace. Each epic run takes a lock at `.beads/locks/beadsflow-<epic-id>.lock`.
+- Concurrency: run one epic per workspace. Each epic run takes a lock at `.beads/locks/beadsflow-<epic-id>.lock`. Epic IDs may contain only letters, digits, `.`, `_` and `-` and must start with a letter or digit; anything else (path separators, a leading dot) is refused before the lock path is built.
 
 ## Stop / attach
 

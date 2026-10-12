@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,20 @@ try:
     import fcntl
 except ImportError:  # pragma: no cover
     fcntl = None  # type: ignore[assignment]
+
+# Epic IDs become one lock filename component; anything that could add or
+# change path components (separators, "..", leading dots, NUL) is refused.
+_EPIC_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def epic_lock_path(beads_dir: Path, epic_id: str) -> Path:
+    """Build the lock path for an epic, refusing IDs that are not a plain filename component."""
+    if _EPIC_ID_PATTERN.fullmatch(epic_id) is None:
+        raise LockError(
+            f"Refusing epic ID {epic_id!r} for locking: only letters, digits, '.', '_' and '-' "
+            "are allowed, starting with a letter or digit"
+        )
+    return beads_dir / "locks" / f"beadsflow-{epic_id}.lock"
 
 
 @dataclass(slots=True)
