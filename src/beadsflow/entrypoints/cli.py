@@ -4,7 +4,7 @@ import argparse
 import sys
 from dataclasses import dataclass
 
-from beadsflow.application.review import resolve_review_request, run_review
+from beadsflow.application.review import DEFAULT_REVIEW_TIMEOUT_SECONDS, resolve_review_request, run_review
 from beadsflow.application.run_epic import RunEpicRequest, run_epic
 from beadsflow.application.session import (
     SessionAttachRequest,
@@ -47,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--prompt-arg", default="-p")
     review_parser.add_argument("--diff-max-bytes", type=int, default=None)
     review_parser.add_argument("--comment-max-bytes", type=int, default=None)
+    review_parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=DEFAULT_REVIEW_TIMEOUT_SECONDS,
+        help="Reviewer command timeout in seconds (positive integer; default: 3600)",
+    )
 
     session_parser = subparsers.add_parser("session", help="Manage a zellij session for an epic run")
     session_subparsers = session_parser.add_subparsers(dest="session_command", required=True)
@@ -122,6 +128,7 @@ def _handle_review(args: argparse.Namespace) -> CliResult:
             prompt_arg=args.prompt_arg,
             diff_max_bytes=args.diff_max_bytes,
             comment_max_bytes=args.comment_max_bytes,
+            timeout_seconds=args.timeout_seconds,
         )
         comment = run_review(request)
         print(comment)

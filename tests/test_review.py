@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from beadsflow.application.errors import CommandError
@@ -127,3 +129,78 @@ def test_resolve_review_request_uses_env_fallbacks(monkeypatch: pytest.MonkeyPat
     assert request.beads_no_db is True
     assert request.diff_max_bytes == DEFAULT_DIFF_MAX_BYTES
     assert request.comment_max_bytes == DEFAULT_COMMENT_MAX_BYTES
+
+
+def test_reviewer_timeout_cli_fails_without_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import os
+    import shlex
+    import sys
+    import time
+
+    import beadsflow.entrypoints.cli as cli
+    from beadsflow.application.review import _run_reviewer_command
+
+    script = tmp_path / "reviewer.py"
+    pidfile = tmp_path / "pid"
+    script.write_text(
+        "import os, pathlib, time\npathlib.Path("
+        + repr(str(pidfile))
+        + ").write_text(str(os.getpid()))\nprint('LGTM', flush=True)\ntime.sleep(30)\n"
+    )
+
+    def fake_review(request: object) -> str:
+        from beadsflow.application.review import ReviewRequest
+
+        assert isinstance(request, ReviewRequest)
+        return _run_reviewer_command(
+            cli_command=f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}",
+            prompt_arg="-p",
+            prompt="test",
+            timeout_seconds=request.timeout_seconds,
+        )
+
+    monkeypatch.setattr(cli, "run_review", fake_review)
+    started = time.monotonic()
+    assert cli.main(["review", "--issue-id", "I", "--epic-id", "E", "--timeout-seconds", "3"]) == 1
+    assert time.monotonic() - started < 10
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "timed out after 3 seconds" in output.err
+    assert pidfile.exists()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pidfile.read_text()), 0)
+
+
+@pytest.mark.parametrize("timeout", [0, -1])
+def test_invalid_review_timeout_fails_before_review(
+    monkeypatch: pytest.MonkeyPatch, timeout: int, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import beadsflow.entrypoints.cli as cli
+
+    def forbidden_review(request: object) -> str:
+        raise AssertionError("must validate before review")
+
+    monkeypatch.setattr(cli, "run_review", forbidden_review)
+    assert cli.main(["review", "--issue-id", "I", "--epic-id", "E", "--timeout-seconds", str(timeout)]) == 1
+    assert capsys.readouterr().out == ""
+
+
+def test_reviewer_success_and_failure() -> None:
+    import shlex
+    import sys
+
+    from beadsflow.application.review import _run_reviewer_command
+
+    command = f"{shlex.quote(sys.executable)} -c "
+    assert (
+        _run_reviewer_command(cli_command=command + shlex.quote("print('LGTM')"), prompt_arg="-p", prompt="test")
+        == "LGTM\n"
+    )
+    with pytest.raises(CommandError, match="exit 3.*broken"):
+        _run_reviewer_command(
+            cli_command=command + shlex.quote("import sys; print('broken', file=sys.stderr); sys.exit(3)"),
+            prompt_arg="-p",
+            prompt="test",
+        )
