@@ -55,7 +55,7 @@ Each implementer/reviewer profile can customize how comments are posted:
 
 - `comment_mode` (default: `"command"`): `"command"` means your command posts Beads comments itself; `"stdout"` means beadsflow posts the command stdout as the Beads comment.
 - `comment_prefix` / `comment_suffix`: strings appended before/after stdout when `comment_mode = "stdout"`.
-- `require_git_changes` (default: `false`): for implementers, fail the run if the git working tree did not change.
+- `require_git_changes` (default: `false`): for implementers, fail the run if the Git signature did not change. The signature includes HEAD, tracked/staged patches, and Git-reported untracked file bytes and modes. Committed changes and edits to already-untracked files count; ignored files do not. Symlinks contribute their link target text without reading the target. Git-reported directories (including nested repositories) and special files contribute type/mode metadata without reading their contents.
 - Stdout comments are truncated by default (800 bytes / 40 lines). Override with `BEADSFLOW_MAX_COMMENT_BYTES` and `BEADSFLOW_MAX_COMMENT_LINES` (set to `0` to disable).
 
 Example (stdout mode):
@@ -222,3 +222,5 @@ uv run beadsflow session status beadsflow-<epic-id>
 ```
 
 If zellij is not installed, `beadsflow session ...` prints an equivalent manual `uv run beadsflow run ...` command.
+
+Runner profile commands on macOS/Linux execute in an owned process group. On timeout or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. This applies to runner profiles, not the standalone `beadsflow review` helper.

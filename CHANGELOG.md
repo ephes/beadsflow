@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Fixed
+
+- Terminate runner profile process groups on timeout and interruption while retaining timeout output.
+- Count HEAD changes and untracked file bytes/modes in the Git-change requirement; exclude ignored files and never follow untracked symlinks.
+
 ### Added
 
 - Add read-only push/PR quality CI with frozen uv dependencies, Ruff lint/format, mypy, and isolated unit tests.
