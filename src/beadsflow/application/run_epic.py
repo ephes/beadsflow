@@ -8,7 +8,7 @@ from pathlib import Path
 from beadsflow.application.errors import BeadsflowError, ConfigError
 from beadsflow.application.runner import EpicRunLoop
 from beadsflow.infra.beads_cli import BeadsCli
-from beadsflow.infra.locking import EpicLock
+from beadsflow.infra.locking import EpicLock, epic_lock_path
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.settings import apply_cli_overrides, apply_env_overrides, load_settings
 
@@ -74,7 +74,7 @@ def run_epic(request: RunEpicRequest) -> int:
             raise ConfigError(f"Beads directory not found: {repo_paths.beads_dir}")
 
         beads_cli = BeadsCli(beads_dir=str(repo_paths.beads_dir), no_db=settings.beads_no_db)
-        lock_path = repo_paths.beads_dir / "locks" / f"beadsflow-{request.epic_id}.lock"
+        lock_path = epic_lock_path(repo_paths.beads_dir, request.epic_id)
 
         with EpicLock(lock_path=lock_path):
             loop = EpicRunLoop(

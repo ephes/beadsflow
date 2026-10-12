@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Fixed
+
+- Refuse symlinked epic lock paths and nonregular files; close handles and release locks on acquisition or PID-write failures.
+- Refuse epic IDs that are not a plain filename component (letters, digits, `.`, `_`, `-`; no path separators or leading dot) before building the lock path.
+
 ### Added
 
 - Add read-only push/PR quality CI with frozen uv dependencies, Ruff lint/format, mypy, and isolated unit tests.

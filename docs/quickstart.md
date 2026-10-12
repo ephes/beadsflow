@@ -187,7 +187,7 @@ uv run beadsflow run <epic-id> --interval 30
 Notes:
 
 - `beadsflow` uses `bd --no-daemon` semantics and sets `BEADS_NO_DAEMON=1` and `BEADS_DIR=...` for internal `bd` calls.
-- Concurrency: run one epic per workspace. Each epic run takes a lock at `.beads/locks/beadsflow-<epic-id>.lock`.
+- Concurrency: run one epic per workspace. Each epic run takes a lock at `.beads/locks/beadsflow-<epic-id>.lock`. Epic IDs may contain only letters, digits, `.`, `_` and `-` and must start with a letter or digit; anything else (path separators, a leading dot) is refused before the lock path is built.
 
 ## Stop / attach
 
@@ -222,3 +222,7 @@ uv run beadsflow session status beadsflow-<epic-id>
 ```
 
 If zellij is not installed, `beadsflow session ...` prints an equivalent manual `uv run beadsflow run ...` command.
+
+Epic locks refuse symlinked components in the two directory levels above the lock file (`.beads/locks` for epic runs) and nonregular lock files before writing PID metadata. Contention and acquisition/PID-write failures close the handle and release any acquired lock, allowing a later retry.
+
+Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
