@@ -12,6 +12,7 @@ from beadsflow.application.select import marker_from_comment, marker_from_text
 from beadsflow.domain.models import Comment, Issue, Marker
 from beadsflow.infra.beads_cli import BeadsCli
 
+DEFAULT_REVIEW_TIMEOUT_SECONDS = 3600
 DEFAULT_DIFF_MAX_BYTES = 8000
 DEFAULT_COMMENT_MAX_BYTES = 4000
 TRUNCATED_NOTICE = "\n\n[truncated]"
@@ -28,6 +29,7 @@ class ReviewRequest:
     prompt_arg: str
     diff_max_bytes: int
     comment_max_bytes: int
+    timeout_seconds: int = DEFAULT_REVIEW_TIMEOUT_SECONDS
 
 
 def _truncate_utf8(text: str, max_bytes: int) -> str:
@@ -166,17 +168,25 @@ def _build_prompt(
     ).strip()
 
 
-def _run_reviewer_command(*, cli_command: str, prompt_arg: str, prompt: str) -> str:
+def _run_reviewer_command(
+    *, cli_command: str, prompt_arg: str, prompt: str, timeout_seconds: int = DEFAULT_REVIEW_TIMEOUT_SECONDS
+) -> str:
     argv = shlex.split(cli_command)
     if not argv:
         raise CommandError("Reviewer command is empty")
     argv = [*argv, prompt_arg, prompt]
-    completed = subprocess.run(
-        argv,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    if timeout_seconds <= 0:
+        raise CommandError("Review timeout must be a positive number of seconds")
+    try:
+        completed = subprocess.run(
+            argv,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CommandError(f"Reviewer command timed out after {timeout_seconds} seconds") from exc
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()
         stdout = (completed.stdout or "").strip()
@@ -216,6 +226,7 @@ def run_review(request: ReviewRequest) -> str:
         cli_command=request.cli_command,
         prompt_arg=request.prompt_arg,
         prompt=prompt,
+        timeout_seconds=request.timeout_seconds,
     )
     return _ensure_marker(output)
 
@@ -230,7 +241,10 @@ def resolve_review_request(
     prompt_arg: str,
     diff_max_bytes: int | None,
     comment_max_bytes: int | None,
+    timeout_seconds: int = DEFAULT_REVIEW_TIMEOUT_SECONDS,
 ) -> ReviewRequest:
+    if timeout_seconds <= 0:
+        raise CommandError("Review timeout must be a positive number of seconds")
     resolved_issue = issue_id or os.environ.get("BEADSFLOW_ISSUE_ID")
     if not resolved_issue:
         raise CommandError("Missing issue id (set --issue-id or BEADSFLOW_ISSUE_ID)")
@@ -251,4 +265,5 @@ def resolve_review_request(
         prompt_arg=prompt_arg,
         diff_max_bytes=diff_max_bytes if diff_max_bytes is not None else DEFAULT_DIFF_MAX_BYTES,
         comment_max_bytes=comment_max_bytes if comment_max_bytes is not None else DEFAULT_COMMENT_MAX_BYTES,
+        timeout_seconds=timeout_seconds,
     )

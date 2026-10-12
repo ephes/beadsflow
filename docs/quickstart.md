@@ -84,6 +84,8 @@ comment_mode = "stdout"
 `--cli` is parsed with `shlex.split(...)`, so you can pass a full command (e.g., `--cli "claude --model opus"`).
 Use `--prompt-arg` to match the flag your CLI uses to receive the prompt (default: `-p`).
 
+The standalone helper limits its reviewer command to 3600 seconds by default, matching the runner default. Set `beadsflow review --timeout-seconds 120` to override (positive integer). Configure this explicitly alongside `run.command_timeout_seconds` when using a different runner deadline; allow the outer runner enough time for context collection and cleanup. A timeout exits nonzero, writes a diagnostic to stderr, and prints no review comment or approval, even if the command emitted partial output. Python terminates and waits for the direct reviewer process; independently spawned descendants are not guaranteed to be terminated.
+
 ### Command execution semantics
 
 - `command` is **not** run via an implicit shell; it is parsed with `shlex.split(...)` into argv and executed directly.
