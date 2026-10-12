@@ -8,8 +8,6 @@ from beadsflow.application.review import (
     DEFAULT_DIFF_MAX_BYTES,
     TRUNCATED_NOTICE,
     _ensure_marker,
-    _is_changes_requested_line,
-    _is_lgtm_line,
     _truncate_utf8,
     _truncate_with_notice,
     resolve_review_request,
@@ -42,41 +40,6 @@ def test_truncate_with_notice_adds_notice() -> None:
     assert len(truncated.encode("utf-8")) <= max_bytes
 
 
-@pytest.mark.parametrize(
-    ("line", "expected"),
-    [
-        ("LGTM", True),
-        ("LGTM.", True),
-        ("LGTM!", True),
-        ("LGTM123", False),
-        ("lgtm", True),
-        ("**LGTM**", True),
-        ("`LGTM`", True),
-        ("- LGTM", True),
-        ("Looks good", False),
-    ],
-)
-def test_is_lgtm_line(line: str, expected: bool) -> None:
-    assert _is_lgtm_line(line) is expected
-
-
-@pytest.mark.parametrize(
-    ("line", "expected"),
-    [
-        ("Changes requested", True),
-        ("Changes requested:", True),
-        ("Changes requested: fix this", True),
-        ("Changes requested - fix this", False),
-        ("changes requested", True),
-        ("**Changes requested:** fix this", True),
-        ("- Changes requested: fix this", True),
-        ("Needs work", False),
-    ],
-)
-def test_is_changes_requested_line(line: str, expected: bool) -> None:
-    assert _is_changes_requested_line(line) is expected
-
-
 def test_ensure_marker_empty_output_defaults_to_changes_requested() -> None:
     assert _ensure_marker("") == "Changes requested:\n\n(no review output)"
 
@@ -86,9 +49,9 @@ def test_ensure_marker_keeps_first_marker_line() -> None:
     assert _ensure_marker(output) == output
 
 
-def test_ensure_marker_keeps_first_marker_line_with_markdown() -> None:
+def test_ensure_marker_rejects_first_approval_with_markdown() -> None:
     output = "**LGTM**\n\nLooks good"
-    assert _ensure_marker(output) == output
+    assert _ensure_marker(output) == "Changes requested:\n\n" + output
 
 
 def test_ensure_marker_trims_leading_blank_lines() -> None:
@@ -96,15 +59,15 @@ def test_ensure_marker_trims_leading_blank_lines() -> None:
     assert _ensure_marker(output) == "LGTM\nAll good"
 
 
-def test_ensure_marker_prepends_marker_from_later_line() -> None:
+def test_ensure_marker_rejects_approval_from_later_line() -> None:
     output = "Looks good\n\nLGTM\nMore details"
-    expected = "LGTM\n\nLooks good\n\nLGTM\nMore details"
+    expected = "Changes requested:\n\nLooks good\n\nLGTM\nMore details"
     assert _ensure_marker(output) == expected
 
 
-def test_ensure_marker_prepends_marker_from_later_line_with_markdown() -> None:
+def test_ensure_marker_rejects_approval_from_later_line_with_markdown() -> None:
     output = "Looks good\n\n**LGTM**\nMore details"
-    expected = "LGTM\n\nLooks good\n\n**LGTM**\nMore details"
+    expected = "Changes requested:\n\nLooks good\n\n**LGTM**\nMore details"
     assert _ensure_marker(output) == expected
 
 

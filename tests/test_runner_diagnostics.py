@@ -289,3 +289,33 @@ def test_cap_comment_body_no_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     capped = _cap_comment_body(body=body, prefix="pre-", suffix="-suf")
 
     assert capped == body
+
+
+def test_runner_rejects_conflict_lost_by_truncation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import logging
+
+    from beadsflow.domain.models import Marker
+    from beadsflow.infra.run_command import CommandResult
+
+    monkeypatch.setenv("BEADSFLOW_MAX_COMMENT_BYTES", "100")
+    fake = _FakeBeads(comments=[])
+    loop = EpicRunLoop(
+        beads=fake,  # type: ignore[arg-type]
+        epic_id="epic",
+        settings=Settings.defaults(),
+        repo_paths=RepoPaths(repo_root=tmp_path, beads_dir=tmp_path / ".beads"),
+        implementer_name=None,
+        reviewer_name=None,
+        logger=logging.getLogger("test"),
+    )
+    result = CommandResult(argv=[], returncode=0, stdout="LGTM\n" + "x" * 1000 + "\nChanges requested: fix", stderr="")
+    with pytest.raises(CommandError, match="changed verdict"):
+        loop._comment_from_stdout(
+            issue_id="issue",
+            result=result,
+            prefix="",
+            suffix="",
+            expected_markers={Marker.LGTM, Marker.CHANGES_REQUESTED},
+            phase="reviewer",
+        )
+    assert fake.comments == []

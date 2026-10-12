@@ -45,9 +45,6 @@ def test_determine_phase_ready_for_review_means_review() -> None:
         ("**Ready for review:**", Marker.READY_FOR_REVIEW),
         ("`Ready for review:`", Marker.READY_FOR_REVIEW),
         ("LGTM", Marker.LGTM),
-        ("LGTM.", Marker.LGTM),
-        ("- **LGTM**", Marker.LGTM),
-        ("`LGTM`", Marker.LGTM),
         ("Changes requested: please update", Marker.CHANGES_REQUESTED),
         ("- Changes requested: please update", Marker.CHANGES_REQUESTED),
         ("**Changes requested:** please update", Marker.CHANGES_REQUESTED),
@@ -138,3 +135,29 @@ def test_select_next_child_skips_not_ready() -> None:
     selected = select_next_child(children=children, resume_in_progress=False, is_ready=is_ready)
     assert selected is not None
     assert selected.id == "b"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I cannot approve this change.\n\n> LGTM\nThat was an earlier reviewer.",
+        "> LGTM",
+        "- LGTM",
+        "**LGTM**",
+        "`LGTM`",
+        "```\nLGTM\n```",
+        "LGTM.",
+        "LGTM: needs fixes",
+        "lgtm",
+        "LGTM\nChanges requested: fix it",
+        "LGTM\n> Changes requested: fix it",
+    ],
+)
+def test_ambiguous_approval_cannot_close(text: str) -> None:
+    from beadsflow.application.review import _ensure_marker
+
+    comment = Comment(id=1, author="a", text=text, created_at=_dt("2025-01-01T00:00:00"))
+    assert determine_phase_from_comments([comment]) is not Phase.CLOSE
+    normalized = Comment(id=2, author="a", text=_ensure_marker(text), created_at=comment.created_at)
+    assert determine_phase_from_comments([normalized]) is Phase.IMPLEMENT
+    assert text in normalized.text
