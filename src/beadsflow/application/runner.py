@@ -333,14 +333,13 @@ class EpicRunLoop:
             argv,
             check=False,
             capture_output=True,
-            text=True,
             cwd=self.repo_paths.repo_root,
-            errors="surrogateescape",
         )
         if completed.returncode not in allow_exit:
-            stderr = (completed.stderr or "").strip()
+            stderr = completed.stderr.decode("utf-8", errors="replace").strip()
             raise CommandError(f"{' '.join(argv)} failed: {stderr or 'unknown error'}")
-        return completed.stdout
+        # Decode bytes directly: text mode would translate "\r" in paths and patches to "\n".
+        return completed.stdout.decode("utf-8", errors="surrogateescape")
 
     def _comment_from_stdout(
         self,

@@ -112,3 +112,20 @@ def test_nested_repository_and_fifo(loop: EpicRunLoop) -> None:
     special = untracked_signature(root, "fifo")
     fifo.chmod(0o600)
     assert untracked_signature(root, "fifo") != special
+
+
+def test_carriage_return_name_is_not_confused_with_newline_name(loop: EpicRunLoop) -> None:
+    root = loop.repo_paths.repo_root
+    carriage = root / "name\rsuffix"
+    carriage.write_bytes(b"first")
+    before = loop._git_signature()
+    assert loop._git_signature() == before
+    carriage.write_bytes(b"second")
+    changed = loop._git_signature()
+    assert changed != before
+    newline = root / "name\nsuffix"
+    newline.write_bytes(b"other")
+    both = loop._git_signature()
+    assert both != changed
+    carriage.write_bytes(b"third!")
+    assert loop._git_signature() != both
