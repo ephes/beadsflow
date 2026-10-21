@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Security
+
+- Update the locked certifi CA bundle to 2026.10.19 for the eMudhra/emSign CA compromise ([GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)). Lock-only change; re-sync environments created from the lock.
+
 ### Added
 
 - Add read-only push/PR quality CI with frozen uv dependencies, Ruff lint/format, mypy, and isolated unit tests.
