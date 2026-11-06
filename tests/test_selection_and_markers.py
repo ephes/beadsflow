@@ -161,3 +161,30 @@ def test_ambiguous_approval_cannot_close(text: str) -> None:
     normalized = Comment(id=2, author="a", text=_ensure_marker(text), created_at=comment.created_at)
     assert determine_phase_from_comments([normalized]) is Phase.IMPLEMENT
     assert text in normalized.text
+
+
+@pytest.mark.parametrize(
+    ("newest_text", "expected_marker", "expected_phase"),
+    [
+        ("Changes requested: revise", Marker.CHANGES_REQUESTED, Phase.IMPLEMENT),
+        ("Ready for review: updated", Marker.READY_FOR_REVIEW, Phase.REVIEW),
+        ("LGTM", Marker.LGTM, Phase.CLOSE),
+    ],
+)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_tied_comments_use_numeric_id_for_phase_and_review_context(
+    newest_text: str, expected_marker: Marker, expected_phase: Phase, reverse: bool
+) -> None:
+    from beadsflow.application.review import _latest_comment
+
+    now = _dt("2025-01-01T00:00:00")
+    comments = [
+        Comment(2, "reviewer", "LGTM", now),
+        Comment(3, "implementer", "Ready for review: old", now),
+        Comment(10, "newest", newest_text, now),
+    ]
+    if reverse:
+        comments.reverse()
+    assert latest_marker(comments) is expected_marker
+    assert determine_phase_from_comments(comments) is expected_phase
+    assert _latest_comment(comments, set(Marker)) == Comment(10, "newest", newest_text, now)

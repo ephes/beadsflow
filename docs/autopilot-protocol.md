@@ -22,6 +22,11 @@ For a given bead, `beadsflow` looks at the **most recent marker** in the comment
 - If the most recent marker is `Ready for review:` and there is no later `LGTM`, run the reviewer phase.
 - If the most recent marker is `Changes requested:` (or there are no markers), run the implementer phase.
 
+Comments are ordered chronologically by timestamp, with numeric comment ID as the
+tie-breaker (larger IDs are newer). Input array order does not affect phase
+selection or the helper's latest Ready for review / previous review context.
+This ordering is separate from the fail-closed marker grammar above.
+
 ## Minimal end-to-end example
 
 This shows the smallest practical “implement → review → approve” loop with commands you can run locally.
