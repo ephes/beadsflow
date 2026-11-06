@@ -90,6 +90,13 @@ require_git_changes = true
 then asks a local CLI (default: `claude -p`) to produce a review comment. It prints the comment to stdout so you can use
 `comment_mode = "stdout"`.
 
+The helper includes the issue identity/title/status/description/acceptance criteria,
+latest readiness and review comments, Git status, staged/unstaged diff statistics,
+and a byte-limited patch. Comment bodies have a separate byte limit. Truncation
+preserves UTF-8 and adds a notice when space permits. Synthetic orchestration tests
+exercise this assembly, request forwarding, Git failure handling and conservative
+verdict normalization without running Beads or an agent.
+
 ```toml
 [reviewers.claude]
 command = "beadsflow review --cli claude"
