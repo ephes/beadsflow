@@ -49,6 +49,21 @@ on_command_failure = "stop"
 command_timeout_seconds = 3600
 ```
 
+If no repo-root `beadsflow.toml` exists, defaults apply. An explicit `--config` or `BEADSFLOW_CONFIG` path must exist and be readable.
+Missing explicit files, read/UTF-8/TOML failures, and empty or incorrectly quoted profile commands fail with exit code 1 and a configuration diagnostic before locking or launching processes. File diagnostics include bounded path context and the error type, without dumping file contents or a traceback.
+
+Numeric settings must be TOML integers (quoted numbers, floats, and booleans are rejected):
+
+| Setting | Allowed range (inclusive) | Zero behavior |
+| --- | --- | --- |
+| `interval_seconds` / `--interval` / `BEADSFLOW_INTERVAL` | 0–86400 seconds | Poll without sleeping |
+| `run.max_iterations` / `--max-iterations` | 1–1000000 | Rejected |
+| `run.command_timeout_seconds` | 1–86400 seconds | Rejected |
+
+TOML flags (`beads_no_db`, `run.resume_in_progress`, profile `require_git_changes`) require actual `true`/`false` values.
+`BEADSFLOW_BEADS_NO_DB` accepts `1/0`, `true/false`, `yes/no`, or `on/off` (case insensitive).
+Merged CLI/environment numeric settings are validated before acquiring an epic lock or starting commands.
+
 ### Profile options (optional)
 
 Each implementer/reviewer profile can customize how comments are posted:
@@ -228,3 +243,5 @@ Epic locks refuse symlinked components in the two directory levels above the loc
 Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
 
 Runner profile commands on macOS/Linux execute in an owned process group. On timeout or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. This applies to runner profiles, not the standalone `beadsflow review` helper.
+
+Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to one second for output draining. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync failure triggers automatic import/retry; other failures stop immediately. `run.command_timeout_seconds` continues to apply only to profiles.

@@ -7,7 +7,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from beadsflow.application.errors import CommandError
+from beadsflow.application.errors import ConfigError
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,9 +16,12 @@ class CommandSpec:
 
     @staticmethod
     def from_string(command: str) -> CommandSpec:
-        argv = shlex.split(command)
+        try:
+            argv = shlex.split(command)
+        except ValueError as exc:
+            raise ConfigError("Invalid command quoting") from exc
         if not argv:
-            raise CommandError("Command is empty")
+            raise ConfigError("Command is empty")
         return CommandSpec(argv=argv)
 
     def render(self, *, epic_id: str, issue_id: str) -> list[str]:
@@ -39,7 +42,7 @@ class CommandResult:
 def run_command(
     *,
     argv: Sequence[str],
-    timeout_seconds: int,
+    timeout_seconds: float,
     env: dict[str, str],
 ) -> CommandResult:
     process = subprocess.Popen(

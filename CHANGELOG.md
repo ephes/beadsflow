@@ -19,6 +19,14 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Bound internal Beads CLI operations and out-of-sync recovery to a shared 30-second deadline; reap timed-out commands, release locks, and never retry ambiguous mutations.
+
+- Report explicit missing/unreadable/invalid config files and malformed profile command quoting as configuration errors before locking.
+
+- Reject coerced TOML booleans/numbers and out-of-range timing/iteration settings; validate CLI/environment overrides before work starts.
+
+- Honor dependencies outside the selected epic when deciding whether a child can run or resume.
+
 - Refuse symlinked epic lock paths and nonregular files; close handles and release locks on acquisition or PID-write failures.
 - Refuse epic IDs that are not a plain filename component (letters, digits, `.`, `_`, `-`; no path separators or leading dot) before building the lock path.
 - Terminate runner profile process groups on timeout and interruption while retaining timeout output.

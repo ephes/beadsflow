@@ -12,6 +12,8 @@ Use these exact markers as the first non-empty line of a comment:
 - `LGTM` — reviewer approves; the bead is considered complete.
 - `Changes requested:` — reviewer requests changes; implementer should take over again.
 
+Only children of the selected epic are candidates for execution. Every blocking dependency reported by Beads must be closed before a child can run, including dependencies outside the epic. Open, in-progress, or blocked external dependencies prevent both new and resumed work. Readiness checks `dependency_type = "blocks"`; parent-child and association edges do not block execution. For older payloads with a missing, empty, or null dependency type, the dependency is treated as blocking.
+
 ## How beadsflow chooses the next phase
 
 For a given bead, `beadsflow` looks at the **most recent marker** in the comment history:

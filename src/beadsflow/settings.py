@@ -61,6 +61,24 @@ class Settings:
         )
 
 
+def _boolean(value: Any, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(f"{name} must be a boolean")
+    return value
+
+
+def _integer(value: Any, name: str, minimum: int, maximum: int) -> int:
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise ConfigError(f"{name} must be an integer from {minimum} to {maximum}")
+    return value
+
+
+def validate_numeric_settings(settings: Settings) -> None:
+    _integer(settings.interval_seconds, "interval_seconds", 0, 86400)
+    _integer(settings.run.max_iterations, "run.max_iterations", 1, 1000000)
+    _integer(settings.run.command_timeout_seconds, "run.command_timeout_seconds", 1, 86400)
+
+
 def _parse_profile(value: Any) -> Profile:
     if not isinstance(value, dict):
         raise ConfigError("Profile must be a table")
@@ -76,7 +94,7 @@ def _parse_profile(value: Any) -> Profile:
     comment_suffix = value.get("comment_suffix", "")
     if not isinstance(comment_suffix, str):
         raise ConfigError("Profile.comment_suffix must be a string")
-    require_git_changes = bool(value.get("require_git_changes", False))
+    require_git_changes = _boolean(value.get("require_git_changes", False), "Profile.require_git_changes")
     return Profile(
         command=CommandSpec.from_string(command),
         comment_mode=comment_mode,
@@ -92,20 +110,28 @@ def _parse_run_settings(value: Any, base: RunSettings) -> RunSettings:
     if not isinstance(value, dict):
         raise ConfigError("[run] must be a table")
     return RunSettings(
-        max_iterations=int(value.get("max_iterations", base.max_iterations)),
-        resume_in_progress=bool(value.get("resume_in_progress", base.resume_in_progress)),
+        max_iterations=_integer(value.get("max_iterations", base.max_iterations), "run.max_iterations", 1, 1000000),
+        resume_in_progress=_boolean(
+            value.get("resume_in_progress", base.resume_in_progress), "run.resume_in_progress"
+        ),
         selection_strategy=str(value.get("selection_strategy", base.selection_strategy)),
         on_command_failure=str(value.get("on_command_failure", base.on_command_failure)),
-        command_timeout_seconds=int(value.get("command_timeout_seconds", base.command_timeout_seconds)),
+        command_timeout_seconds=_integer(
+            value.get("command_timeout_seconds", base.command_timeout_seconds), "run.command_timeout_seconds", 1, 86400
+        ),
     )
 
 
 def load_settings(*, config_path: Path | None) -> Settings:
     settings = Settings.defaults()
-    if config_path is None or not config_path.exists():
+    if config_path is None:
         return settings
 
-    raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    try:
+        raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        path_context = repr(str(config_path)[:200])
+        raise ConfigError(f"Cannot read config {path_context} ({type(exc).__name__})") from exc
     if not isinstance(raw, dict):
         raise ConfigError("Config must be a TOML table at the root")
 
@@ -119,8 +145,10 @@ def load_settings(*, config_path: Path | None) -> Settings:
 
     settings = Settings(
         beads_dir=str(raw.get("beads_dir", settings.beads_dir)),
-        beads_no_db=bool(raw.get("beads_no_db", settings.beads_no_db)),
-        interval_seconds=int(raw.get("interval_seconds", settings.interval_seconds)),
+        beads_no_db=_boolean(raw.get("beads_no_db", settings.beads_no_db), "beads_no_db"),
+        interval_seconds=_integer(
+            raw.get("interval_seconds", settings.interval_seconds), "interval_seconds", 0, 86400
+        ),
         log_level=str(raw.get("log_level", settings.log_level)),
         implementer=str(raw.get("implementer")) if raw.get("implementer") is not None else None,
         reviewer=str(raw.get("reviewer")) if raw.get("reviewer") is not None else None,
@@ -138,8 +166,14 @@ def apply_env_overrides(settings: Settings) -> Settings:
     if beads_no_db_env is None:
         beads_no_db = settings.beads_no_db
     else:
-        beads_no_db = beads_no_db_env.strip().lower() in {"1", "true", "yes", "on"}
-    interval = int(os.environ.get("BEADSFLOW_INTERVAL", str(settings.interval_seconds)))
+        normalized = beads_no_db_env.strip().lower()
+        if normalized not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            raise ConfigError("BEADSFLOW_BEADS_NO_DB must be a boolean (1/0, true/false, yes/no, on/off)")
+        beads_no_db = normalized in {"1", "true", "yes", "on"}
+    try:
+        interval = int(os.environ.get("BEADSFLOW_INTERVAL", str(settings.interval_seconds)))
+    except ValueError as exc:
+        raise ConfigError("BEADSFLOW_INTERVAL must be an integer from 0 to 86400") from exc
     implementer = os.environ.get("BEADSFLOW_IMPLEMENTER")
     reviewer = os.environ.get("BEADSFLOW_REVIEWER")
     config_log_level = os.environ.get("BEADSFLOW_LOG_LEVEL")

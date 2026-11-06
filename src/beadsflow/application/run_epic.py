@@ -10,7 +10,7 @@ from beadsflow.application.runner import EpicRunLoop
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.locking import EpicLock, epic_lock_path
 from beadsflow.infra.paths import RepoPaths
-from beadsflow.settings import apply_cli_overrides, apply_env_overrides, load_settings
+from beadsflow.settings import apply_cli_overrides, apply_env_overrides, load_settings, validate_numeric_settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +60,7 @@ def run_epic(request: RunEpicRequest) -> int:
             verbose=request.verbose,
             quiet=request.quiet,
         )
+        validate_numeric_settings(settings)
         implementer_name = settings.implementer
         reviewer_name = settings.reviewer
         max_iterations = settings.run.max_iterations
