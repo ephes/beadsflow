@@ -245,3 +245,17 @@ Trusted ancestors above those two levels are resolved first, so system aliases s
 Runner profile commands on macOS/Linux execute in an owned process group. On timeout or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. This applies to runner profiles, not the standalone `beadsflow review` helper.
 
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to one second for output draining. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync failure triggers automatic import/retry; other failures stop immediately. `run.command_timeout_seconds` continues to apply only to profiles.
+
+
+Git status, diff, HEAD and untracked-path commands used for review context and
+`require_git_changes` each have a separate 30-second execution budget (at most
+five commands per collection). Diff collection disables external diff and textconv
+helpers. A timeout, launch failure or unsuccessful Git command stops the operation
+with a command error; the review helper prints no comment and never launches its
+reviewer with failed context. Runner signature failures stop before launching an
+implementer or accepting its output. Git output is decoded without newline
+translation or loss of filename bytes for signatures. Review prompts replace
+invalid UTF-8 with replacement characters so non-UTF-8 text patches remain reviewable. Owned Git process groups
+use the same TERM/KILL cleanup as runner profiles, with up to one second of
+additional output draining; descendants that deliberately leave the group are
+outside this guarantee. These budgets are separate from profile/reviewer timeouts.

@@ -11,6 +11,7 @@ from beadsflow.application.errors import CommandError
 from beadsflow.application.select import marker_from_comment, marker_from_text
 from beadsflow.domain.models import Comment, Issue, Marker
 from beadsflow.infra.beads_cli import BeadsCli
+from beadsflow.infra.git_command import capture_git
 
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 3600
 DEFAULT_DIFF_MAX_BYTES = 8000
@@ -72,19 +73,8 @@ def _format_comment(comment: Comment | None, max_bytes: int) -> str:
 
 
 def _run_git(args: list[str]) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if completed.returncode != 0:
-        stderr = (completed.stderr or "").strip()
-        stdout = (completed.stdout or "").strip()
-        detail = stderr or stdout or "unknown error"
-        logger.debug("git %s failed (exit %s): %s", " ".join(args), completed.returncode, detail)
-        return f"(git {' '.join(args)} failed: {detail})"
-    return completed.stdout.strip()
+    # Review prompts are display text; signatures keep the byte-preserving default.
+    return capture_git(args, preserve_output=False).strip()
 
 
 def _format_git_sections(unstaged: str, staged: str) -> str:

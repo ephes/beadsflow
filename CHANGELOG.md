@@ -21,6 +21,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Bound each review-context and runner-signature Git command to 30 seconds with owned process-group cleanup, disable external diff/textconv helpers, preserve raw signature output while replacing invalid UTF-8 in review text, and stop on incomplete Git context.
+
 - Bound internal Beads CLI operations and out-of-sync recovery to a shared 30-second deadline; reap timed-out commands, release locks, and never retry ambiguous mutations.
 
 - Report explicit missing/unreadable/invalid config files and malformed profile command quoting as configuration errors before locking.
