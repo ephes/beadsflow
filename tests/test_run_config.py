@@ -55,3 +55,56 @@ def test_invalid_overrides_fail_before_work(
         assert main(["run", "epic-1", "--once", *args]) == 1
     assert caplog.messages
     assert not (isolated_run / ".beads" / "locks").exists()
+
+
+@pytest.mark.parametrize("source", ["cli", "env"])
+@pytest.mark.parametrize("failure", ["missing", "unreadable", "utf8", "toml", "quote", "empty"])
+def test_config_errors_return_cli_failure(
+    isolated_run: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    source: str,
+    failure: str,
+) -> None:
+    path = isolated_run / "config.toml"
+    if failure == "utf8":
+        path.write_bytes(b"\xff")
+    elif failure == "toml":
+        path.write_text("[run", encoding="utf-8")
+    elif failure in {"quote", "empty"}:
+        command = "'unterminated" if failure == "quote" else ""
+        path.write_text(f'[implementers.fake]\ncommand = "{command}"', encoding="utf-8")
+    elif failure == "unreadable":
+        path.write_text("", encoding="utf-8")
+        original_read = Path.read_text
+
+        def unreadable(self: Path, *args: object, **kwargs: object) -> str:
+            if self == path:
+                raise PermissionError("synthetic denial")
+            return original_read(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", unreadable)
+    args = ["--config", str(path)] if source == "cli" else []
+    if source == "env":
+        monkeypatch.setenv("BEADSFLOW_CONFIG", str(path))
+    with caplog.at_level(logging.ERROR, logger="beadsflow"):
+        assert main(["run", "epic-1", "--once", *args]) == 1
+    assert caplog.messages
+    assert "Traceback" not in caplog.text
+    assert not (isolated_run / ".beads" / "locks").exists()
+
+
+def test_absent_discovered_config_uses_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from beadsflow.application.runner import EpicRunLoop
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".beads").mkdir()
+    for name in ("BEADSFLOW_CONFIG", "BEADSFLOW_INTERVAL", "BEADSFLOW_BEADS_NO_DB"):
+        monkeypatch.delenv(name, raising=False)
+
+    def run(self: EpicRunLoop, **kwargs: object) -> int:
+        assert self.settings.interval_seconds == 30
+        return 0
+
+    monkeypatch.setattr(EpicRunLoop, "run", run)
+    assert main(["run", "epic-1", "--beads-dir", str(tmp_path / ".beads"), "--once"]) == 0

@@ -124,10 +124,14 @@ def _parse_run_settings(value: Any, base: RunSettings) -> RunSettings:
 
 def load_settings(*, config_path: Path | None) -> Settings:
     settings = Settings.defaults()
-    if config_path is None or not config_path.exists():
+    if config_path is None:
         return settings
 
-    raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    try:
+        raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        path_context = repr(str(config_path)[:200])
+        raise ConfigError(f"Cannot read config {path_context} ({type(exc).__name__})") from exc
     if not isinstance(raw, dict):
         raise ConfigError("Config must be a TOML table at the root")
 

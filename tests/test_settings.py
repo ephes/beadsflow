@@ -7,9 +7,8 @@ import pytest
 from beadsflow.settings import apply_cli_overrides, apply_env_overrides, load_settings
 
 
-def test_load_settings_defaults_when_missing(tmp_path: Path) -> None:
-    config_path = tmp_path / "missing.toml"
-    settings = load_settings(config_path=config_path)
+def test_load_settings_defaults_without_config() -> None:
+    settings = load_settings(config_path=None)
     assert settings.beads_dir == ".beads"
     assert settings.interval_seconds == 30
 

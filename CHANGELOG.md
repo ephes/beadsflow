@@ -19,6 +19,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Report explicit missing/unreadable/invalid config files and malformed profile command quoting as configuration errors before locking.
+
 - Reject coerced TOML booleans/numbers and out-of-range timing/iteration settings; validate CLI/environment overrides before work starts.
 
 - Honor dependencies outside the selected epic when deciding whether a child can run or resume.

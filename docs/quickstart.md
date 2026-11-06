@@ -49,6 +49,9 @@ on_command_failure = "stop"
 command_timeout_seconds = 3600
 ```
 
+If no repo-root `beadsflow.toml` exists, defaults apply. An explicit `--config` or `BEADSFLOW_CONFIG` path must exist and be readable.
+Missing explicit files, read/UTF-8/TOML failures, and empty or incorrectly quoted profile commands fail with exit code 1 and a configuration diagnostic before locking or launching processes. File diagnostics include bounded path context and the error type, without dumping file contents or a traceback.
+
 Numeric settings must be TOML integers (quoted numbers, floats, and booleans are rejected):
 
 | Setting | Allowed range (inclusive) | Zero behavior |
