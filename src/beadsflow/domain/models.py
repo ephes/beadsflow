@@ -47,6 +47,7 @@ class IssueSummary:
 class Dependency:
     id: str
     status: IssueStatus
+    dependency_type: str = "blocks"
 
 
 @dataclass(frozen=True, slots=True)

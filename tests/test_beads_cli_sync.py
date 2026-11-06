@@ -30,7 +30,13 @@ def test_beads_cli_auto_imports_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) 
             "issue_type": "task",
             "created_at": "2025-01-01T00:00:00Z",
             "updated_at": "2025-01-01T00:00:00Z",
-            "dependencies": [],
+            "dependencies": [
+                {"id": "external-1", "status": "blocked", "dependency_type": "blocks"},
+                {"id": "epic-1", "status": "open", "dependency_type": "parent-child"},
+                {"id": "legacy-1", "status": "closed"},
+                {"id": "empty-1", "status": "open", "dependency_type": ""},
+                {"id": "null-1", "status": "open", "dependency_type": None},
+            ],
             "dependents": [],
             "comments": [],
         }
@@ -53,6 +59,14 @@ def test_beads_cli_auto_imports_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) 
     cli = BeadsCli(beads_dir=".beads")
     issue = cli.get_issue("beadsflow-1")
     assert issue.id == "beadsflow-1"
+
+    assert [dep.dependency_type for dep in issue.dependencies] == [
+        "blocks",
+        "parent-child",
+        "blocks",
+        "blocks",
+        "blocks",
+    ]
 
     assert show_calls == 2
     assert any(argv[:3] == ["bd", "--no-daemon", "sync"] for argv in calls)

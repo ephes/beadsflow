@@ -146,7 +146,11 @@ class BeadsCli:
 
     def _parse_issue(self, raw: dict[str, Any]) -> Issue:
         dependencies = [
-            Dependency(id=str(dep["id"]), status=_parse_status(str(dep["status"])))
+            Dependency(
+                id=str(dep["id"]),
+                status=_parse_status(str(dep["status"])),
+                dependency_type=str(dep.get("dependency_type") or "blocks"),
+            )
             for dep in raw.get("dependencies", [])
         ]
         dependents = [

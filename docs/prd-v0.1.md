@@ -94,7 +94,7 @@ When multiple child beads are ready, `beadsflow run` must choose deterministical
 Default selection strategy (`priority_then_oldest`):
 
 1. Consider only children under the epic that are `open` (and, if enabled, `in_progress`).
-2. Filter to “ready” children: no unmet dependencies on other children of the epic.
+2. Filter to “ready” children: every blocking dependency reported by Beads is closed, including dependencies outside the epic.
 3. Sort candidates by:
    1. Priority (P1 before P2 before P3 …)
    2. Creation time (oldest first)

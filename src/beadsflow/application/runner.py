@@ -135,7 +135,6 @@ class EpicRunLoop:
         return all(child.status is IssueStatus.CLOSED for child in epic.dependents)
 
     def _select_next_child(self, epic: Issue) -> Issue | None:
-        child_ids = {child.id for child in epic.dependents}
         cache: dict[str, Issue] = {}
 
         def is_ready(child_id: str) -> bool:
@@ -143,7 +142,7 @@ class EpicRunLoop:
             if child is None:
                 child = self.beads.get_issue(child_id)
                 cache[child_id] = child
-            return self._is_child_ready(child, child_ids)
+            return self._is_child_ready(child)
 
         selected = select_next_child(
             children=epic.dependents,
@@ -154,9 +153,9 @@ class EpicRunLoop:
             return None
         return cache.get(selected.id) or self.beads.get_issue(selected.id)
 
-    def _is_child_ready(self, child: Issue, epic_child_ids: set[str]) -> bool:
+    def _is_child_ready(self, child: Issue) -> bool:
         for dep in child.dependencies:
-            if dep.id in epic_child_ids and dep.status is not IssueStatus.CLOSED:
+            if dep.dependency_type == "blocks" and dep.status is not IssueStatus.CLOSED:
                 return False
         return True
 
