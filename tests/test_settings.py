@@ -92,3 +92,51 @@ def test_cli_overrides_take_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
     assert final.implementer == "impl"
     assert final.reviewer == "rev"
     assert final.run.max_iterations == 3
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        'beads_no_db = "false"',
+        '[implementers.fake]\ncommand = "echo"\nrequire_git_changes = "false"',
+        '[run]\nresume_in_progress = "false"',
+        "interval_seconds = true",
+        'interval_seconds = "2"',
+        "interval_seconds = 1.5",
+        "interval_seconds = -1",
+        "interval_seconds = 86401",
+        "[run]\nmax_iterations = false",
+        "[run]\nmax_iterations = 1.5",
+        '[run]\nmax_iterations = "2"',
+        "[run]\nmax_iterations = 0",
+        "[run]\nmax_iterations = 1000001",
+        "[run]\ncommand_timeout_seconds = true",
+        '[run]\ncommand_timeout_seconds = "2"',
+        "[run]\ncommand_timeout_seconds = 1.5",
+        "[run]\ncommand_timeout_seconds = -1",
+        "[run]\ncommand_timeout_seconds = 0",
+        "[run]\ncommand_timeout_seconds = 86401",
+    ],
+)
+def test_config_rejects_coerced_types_and_out_of_range_values(tmp_path: Path, config: str) -> None:
+    from beadsflow.application.errors import ConfigError
+
+    path = tmp_path / "beadsflow.toml"
+    path.write_text(config, encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_settings(config_path=path)
+
+
+@pytest.mark.parametrize("interval,iterations,timeout", [(0, 1, 1), (86400, 1000000, 86400)])
+def test_config_numeric_boundaries(tmp_path: Path, interval: int, iterations: int, timeout: int) -> None:
+    path = tmp_path / "beadsflow.toml"
+    path.write_text(
+        f"interval_seconds = {interval}\n[run]\nmax_iterations = {iterations}\ncommand_timeout_seconds = {timeout}",
+        encoding="utf-8",
+    )
+    settings = load_settings(config_path=path)
+    assert (settings.interval_seconds, settings.run.max_iterations, settings.run.command_timeout_seconds) == (
+        interval,
+        iterations,
+        timeout,
+    )

@@ -19,6 +19,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Reject coerced TOML booleans/numbers and out-of-range timing/iteration settings; validate CLI/environment overrides before work starts.
+
 - Honor dependencies outside the selected epic when deciding whether a child can run or resume.
 
 - Refuse symlinked epic lock paths and nonregular files; close handles and release locks on acquisition or PID-write failures.

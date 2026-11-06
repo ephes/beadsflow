@@ -49,6 +49,18 @@ on_command_failure = "stop"
 command_timeout_seconds = 3600
 ```
 
+Numeric settings must be TOML integers (quoted numbers, floats, and booleans are rejected):
+
+| Setting | Allowed range (inclusive) | Zero behavior |
+| --- | --- | --- |
+| `interval_seconds` / `--interval` / `BEADSFLOW_INTERVAL` | 0–86400 seconds | Poll without sleeping |
+| `run.max_iterations` / `--max-iterations` | 1–1000000 | Rejected |
+| `run.command_timeout_seconds` | 1–86400 seconds | Rejected |
+
+TOML flags (`beads_no_db`, `run.resume_in_progress`, profile `require_git_changes`) require actual `true`/`false` values.
+`BEADSFLOW_BEADS_NO_DB` accepts `1/0`, `true/false`, `yes/no`, or `on/off` (case insensitive).
+Merged CLI/environment numeric settings are validated before acquiring an epic lock or starting commands.
+
 ### Profile options (optional)
 
 Each implementer/reviewer profile can customize how comments are posted:
