@@ -42,7 +42,7 @@ class CommandResult:
 def run_command(
     *,
     argv: Sequence[str],
-    timeout_seconds: int,
+    timeout_seconds: float,
     env: dict[str, str],
 ) -> CommandResult:
     process = subprocess.Popen(

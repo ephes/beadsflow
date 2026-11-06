@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import math
 import os
-import subprocess
+import shlex
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from beadsflow.application.errors import BeadsError
 from beadsflow.domain.models import Comment, Dependency, Issue, IssueStatus, IssueSummary, IssueType
+from beadsflow.infra.run_command import CommandResult, run_command
 
 
 def _parse_datetime(value: str) -> datetime:
@@ -34,6 +37,11 @@ def _parse_issue_type(value: str) -> IssueType:
 class BeadsCli:
     beads_dir: str
     no_db: bool = False
+    command_timeout_seconds: float = 30
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.command_timeout_seconds) or self.command_timeout_seconds <= 0:
+            raise BeadsError("bd command_timeout_seconds must be finite and positive")
 
     def _env(self) -> dict[str, str]:
         env = dict(os.environ)
@@ -51,41 +59,43 @@ class BeadsCli:
     def _is_db_out_of_sync(stderr: str) -> bool:
         return "Database out of sync with JSONL" in stderr
 
-    def _sync_import_only(self) -> None:
-        completed = subprocess.run(
-            self._argv("sync", "--import-only"),
-            check=False,
-            capture_output=True,
-            text=True,
-            env=self._env(),
-        )
+    def _execute(self, argv: list[str], *, deadline: float, operation: str) -> CommandResult:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BeadsError(f"{operation} timed out")
+        try:
+            result = run_command(argv=argv, timeout_seconds=remaining, env=self._env())
+        except OSError as exc:
+            raise BeadsError(f"Cannot execute {operation} ({type(exc).__name__})") from exc
+        if result.returncode == 124:
+            # Completion is ambiguous: never recover/retry a timed-out command.
+            raise BeadsError(f"{operation} timed out")
+        return result
+
+    def _run(self, *args: str) -> CommandResult:
+        deadline = time.monotonic() + self.command_timeout_seconds
+        argv = self._argv(*args)
+        diagnostic_args = args[1:] if args[0] == "--json" else args
+        # Include the operation and issue, but never a comments-add body.
+        count = 3 if diagnostic_args[0] == "comments" else 2
+        operation = "bd " + shlex.join(arg[:200] for arg in diagnostic_args[:count])
+        completed = self._execute(argv, deadline=deadline, operation=operation)
+        if completed.returncode != 0 and self._is_db_out_of_sync(completed.stderr):
+            recovery_operation = f"bd sync --import-only (recovering {operation})"
+            sync = self._execute(
+                self._argv("sync", "--import-only"),
+                deadline=deadline,
+                operation=recovery_operation,
+            )
+            if sync.returncode != 0:
+                raise BeadsError(f"{recovery_operation} failed: {sync.stderr.strip()[:1000]}")
+            completed = self._execute(argv, deadline=deadline, operation=operation)
         if completed.returncode != 0:
-            raise BeadsError(f"bd sync --import-only failed: {completed.stderr.strip()}")
+            raise BeadsError(f"{operation} failed ({completed.returncode}): {completed.stderr.strip()[:1000]}")
+        return completed
 
     def _run_json(self, *args: str) -> Any:
-        argv = self._argv("--json", *args)
-        completed = subprocess.run(
-            argv,
-            check=False,
-            capture_output=True,
-            text=True,
-            env=self._env(),
-        )
-        if completed.returncode != 0:
-            stderr = completed.stderr.strip()
-            if self._is_db_out_of_sync(stderr):
-                self._sync_import_only()
-                completed = subprocess.run(
-                    argv,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    env=self._env(),
-                )
-            if completed.returncode != 0:
-                raise BeadsError(
-                    f"bd failed ({completed.returncode}): bd {' '.join(args)}\n{(completed.stderr or '').strip()}"
-                )
+        completed = self._run("--json", *args)
         try:
             return json.loads(completed.stdout)
         except json.JSONDecodeError as exc:  # pragma: no cover
@@ -99,50 +109,10 @@ class BeadsCli:
         return self._parse_issue(raw)
 
     def comment(self, issue_id: str, text: str) -> None:
-        argv = self._argv("comments", "add", issue_id, text)
-        completed = subprocess.run(
-            argv,
-            check=False,
-            capture_output=True,
-            text=True,
-            env=self._env(),
-        )
-        if completed.returncode != 0:
-            stderr = completed.stderr.strip()
-            if self._is_db_out_of_sync(stderr):
-                self._sync_import_only()
-                completed = subprocess.run(
-                    argv,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    env=self._env(),
-                )
-            if completed.returncode != 0:
-                raise BeadsError(f"bd comments add failed: {(completed.stderr or '').strip()}")
+        self._run("comments", "add", issue_id, text)
 
     def close(self, issue_id: str) -> None:
-        argv = self._argv("close", issue_id)
-        completed = subprocess.run(
-            argv,
-            check=False,
-            capture_output=True,
-            text=True,
-            env=self._env(),
-        )
-        if completed.returncode != 0:
-            stderr = completed.stderr.strip()
-            if self._is_db_out_of_sync(stderr):
-                self._sync_import_only()
-                completed = subprocess.run(
-                    argv,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    env=self._env(),
-                )
-            if completed.returncode != 0:
-                raise BeadsError(f"bd close failed: {(completed.stderr or '').strip()}")
+        self._run("close", issue_id)
 
     def _parse_issue(self, raw: dict[str, Any]) -> Issue:
         dependencies = [

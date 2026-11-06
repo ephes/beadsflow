@@ -42,7 +42,7 @@ def test_beads_cli_auto_imports_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) 
         }
     ]
 
-    def run(argv: list[str], **kwargs: object) -> _Completed:
+    def run(*, argv: list[str], **kwargs: object) -> _Completed:
         nonlocal show_calls
         calls.append(argv)
         if argv[:4] == ["bd", "--no-daemon", "--json", "show"]:
@@ -54,12 +54,11 @@ def test_beads_cli_auto_imports_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) 
             return _Completed(returncode=0)
         raise AssertionError(f"Unexpected argv: {argv}")
 
-    monkeypatch.setattr(beads_cli_mod.subprocess, "run", run)
+    monkeypatch.setattr(beads_cli_mod, "run_command", run)
 
     cli = BeadsCli(beads_dir=".beads")
     issue = cli.get_issue("beadsflow-1")
     assert issue.id == "beadsflow-1"
-
     assert [dep.dependency_type for dep in issue.dependencies] == [
         "blocks",
         "parent-child",
@@ -78,7 +77,7 @@ def test_beads_cli_comment_retries_on_out_of_sync(monkeypatch: pytest.MonkeyPatc
     calls: list[list[str]] = []
     comment_calls = 0
 
-    def run(argv: list[str], **kwargs: object) -> _Completed:
+    def run(*, argv: list[str], **kwargs: object) -> _Completed:
         nonlocal comment_calls
         calls.append(argv)
         if argv[:4] == ["bd", "--no-daemon", "comments", "add"]:
@@ -90,10 +89,50 @@ def test_beads_cli_comment_retries_on_out_of_sync(monkeypatch: pytest.MonkeyPatc
             return _Completed(returncode=0)
         raise AssertionError(f"Unexpected argv: {argv}")
 
-    monkeypatch.setattr(beads_cli_mod.subprocess, "run", run)
+    monkeypatch.setattr(beads_cli_mod, "run_command", run)
 
     cli = BeadsCli(beads_dir=".beads")
     cli.comment("beadsflow-2", "hello")
 
     assert comment_calls == 2
     assert any(argv[:3] == ["bd", "--no-daemon", "sync"] for argv in calls)
+
+
+@pytest.mark.parametrize("operation", ["show", "comment", "close"])
+@pytest.mark.parametrize("failure", ["command", "sync", "retry"])
+def test_beads_cli_recovery_failures_are_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    failure: str,
+) -> None:
+    import beadsflow.infra.beads_cli as module
+    from beadsflow.application.errors import BeadsError
+
+    calls: list[list[str]] = []
+
+    def run(*, argv: list[str], **kwargs: object) -> _Completed:
+        calls.append(argv)
+        if len(calls) == 1 and failure != "command":
+            return _Completed(1, stderr="Database out of sync with JSONL")
+        if len(calls) == 2 and failure == "retry":
+            return _Completed(0)
+        return _Completed(1, stderr="synthetic failure " + "x" * 2000)
+
+    monkeypatch.setattr(module, "run_command", run)
+    cli = BeadsCli(".beads")
+    with pytest.raises(BeadsError) as caught:
+        if operation == "show":
+            cli.get_issue("child-1")
+        elif operation == "comment":
+            cli.comment("child-1", "synthetic")
+        else:
+            cli.close("child-1")
+    assert len(calls) == {"command": 1, "sync": 2, "retry": 3}[failure]
+    expected_operation = {
+        "show": "bd show child-1",
+        "comment": "bd comments add child-1",
+        "close": "bd close child-1",
+    }[operation]
+    assert expected_operation in str(caught.value)
+    assert "synthetic failure" in str(caught.value)
+    assert len(str(caught.value)) < 1100
