@@ -90,6 +90,13 @@ require_git_changes = true
 then asks a local CLI (default: `claude -p`) to produce a review comment. It prints the comment to stdout so you can use
 `comment_mode = "stdout"`.
 
+The helper includes the issue identity/title/status/description/acceptance criteria,
+latest readiness and review comments, Git status, staged/unstaged diff statistics,
+and a byte-limited patch. Comment bodies have a separate byte limit. Truncation
+preserves UTF-8 and adds a notice when space permits. Synthetic orchestration tests
+exercise this assembly, request forwarding, Git failure handling and conservative
+verdict normalization without running Beads or an agent.
+
 ```toml
 [reviewers.claude]
 command = "beadsflow review --cli claude"
@@ -238,6 +245,14 @@ uv run beadsflow session status beadsflow-<epic-id>
 
 If zellij is not installed, `beadsflow session ...` prints an equivalent manual `uv run beadsflow run ...` command.
 
+Noninteractive `session status` and `session stop` commands each give Zellij 10
+seconds to complete. A timeout or process startup failure returns exit code 1
+with an operation diagnostic, without echoing captured subprocess output.
+Python kills and waits for the direct timed-out process; this does not guarantee
+cleanup of independently spawned descendants. A stop timeout can be ambiguous;
+check session status before retrying. Interactive `session start` and `session attach`
+retain their normal interactive lifetimes, with no short control timeout.
+
 Epic locks refuse symlinked components in the two directory levels above the lock file (`.beads/locks` for epic runs) and nonregular lock files before writing PID metadata. Contention and acquisition/PID-write failures close the handle and release any acquired lock, allowing a later retry.
 
 Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
@@ -266,6 +281,19 @@ and posts its failure comment without a log path. Normal and dry-run progress me
 sensitive output, and failure comments can contain excerpts: avoid echoing credentials.
 
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to one second for output draining. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync failure triggers automatic import/retry; other failures stop immediately. `run.command_timeout_seconds` continues to apply only to profiles.
+
+`bd show` must return exactly one issue object. Beads resolves short/partial
+request IDs; its returned canonical identity is preserved. Consumed identities must be nonempty strings, and issue/child statuses and issue
+types must be supported enum values. Priority is a nonnegative JSON integer
+(omitted priority still means P0); comment IDs are nonnegative JSON integers.
+Timestamps must be parseable ISO 8601 values with a timezone, including `Z` or
+an explicit offset, so all issue/child/comment times can be compared safely.
+Optional dependency/child/comment lists may be omitted but must be arrays of
+objects when present; duplicate IDs within a list are refused. Consumed text
+fields must be strings (omitted optional text remains empty). Missing, empty or
+null dependency types retain their legacy blocking meaning. Malformed data
+produces a bounded schema diagnostic without echoing payload values. No comment,
+close or profile is launched using that malformed context.
 
 
 Git status, diff, HEAD and untracked-path commands used for review context and

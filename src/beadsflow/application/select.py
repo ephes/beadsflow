@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import assert_never
 
 from beadsflow.application.phase import Phase, SelectedWork
-from beadsflow.domain.models import Comment, IssueStatus, IssueSummary, Marker
+from beadsflow.domain.models import Comment, IssueStatus, IssueSummary, Marker, comment_order_key
 
 
 def _priority_sort_key(issue: IssueSummary) -> tuple[int, datetime, str]:
@@ -86,7 +86,7 @@ def marker_from_comment(comment: Comment) -> Marker | None:
 
 def latest_marker(comments: Iterable[Comment]) -> Marker | None:
     marker: Marker | None = None
-    for comment in sorted(comments, key=lambda c: c.created_at):
+    for comment in sorted(comments, key=comment_order_key):
         maybe = marker_from_comment(comment)
         if maybe is not None:
             marker = maybe

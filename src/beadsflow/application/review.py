@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from beadsflow.application.errors import CommandError
 from beadsflow.application.select import marker_from_comment, marker_from_text
-from beadsflow.domain.models import Comment, Issue, Marker
+from beadsflow.domain.models import Comment, Issue, Marker, comment_order_key
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.git_command import capture_git
 
@@ -57,7 +57,7 @@ def _truncate_with_notice(text: str, max_bytes: int) -> str:
 
 
 def _latest_comment(comments: list[Comment], markers: set[Marker]) -> Comment | None:
-    for comment in sorted(comments, key=lambda c: c.created_at, reverse=True):
+    for comment in sorted(comments, key=comment_order_key, reverse=True):
         marker = marker_from_comment(comment)
         if marker in markers:
             return comment

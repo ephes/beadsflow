@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 ZellijErrorKind = Literal["missing", "failed"]
+CONTROL_TIMEOUT_SECONDS = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,18 +44,37 @@ class Zellij:
 
     def stop(self, *, session_name: str) -> None:
         self._ensure_available()
-        completed = subprocess.run([self.executable, "kill-session", session_name], check=False)
+        try:
+            completed = subprocess.run(
+                [self.executable, "kill-session", session_name], check=False, timeout=CONTROL_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ZellijError(
+                kind="failed", message=f"zellij stop timed out after {CONTROL_TIMEOUT_SECONDS} seconds"
+            ) from exc
+        except OSError as exc:
+            raise ZellijError(kind="failed", message=f"Cannot execute zellij stop ({type(exc).__name__})") from exc
         if completed.returncode != 0:
             raise ZellijError(kind="failed", message=f"Failed to stop zellij session: {session_name}")
 
     def has_session(self, *, session_name: str) -> bool:
         self._ensure_available()
-        completed = subprocess.run(
-            [self.executable, "list-sessions"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                [self.executable, "list-sessions"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=CONTROL_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ZellijError(
+                kind="failed", message=f"zellij list-sessions timed out after {CONTROL_TIMEOUT_SECONDS} seconds"
+            ) from exc
+        except OSError as exc:
+            raise ZellijError(
+                kind="failed", message=f"Cannot execute zellij list-sessions ({type(exc).__name__})"
+            ) from exc
         if completed.returncode != 0:
             raise ZellijError(kind="failed", message="Failed to list zellij sessions")
 

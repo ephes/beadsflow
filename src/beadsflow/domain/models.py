@@ -34,6 +34,10 @@ class Comment:
     created_at: datetime
 
 
+def comment_order_key(comment: Comment) -> tuple[datetime, int]:
+    return (comment.created_at, comment.id)
+
+
 @dataclass(frozen=True, slots=True)
 class IssueSummary:
     id: str

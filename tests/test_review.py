@@ -204,3 +204,139 @@ def test_reviewer_success_and_failure() -> None:
             prompt_arg="-p",
             prompt="test",
         )
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("\nLGTM\nChecked", "LGTM\nChecked"),
+        ("Unexpected reviewer prose", "Changes requested:\n\nUnexpected reviewer prose"),
+        ("LGTM\nChanges requested: fix", "Changes requested:\n\nLGTM\nChanges requested: fix"),
+    ],
+)
+def test_run_review_assembles_context_and_forwards_request(
+    monkeypatch: pytest.MonkeyPatch, output: str, expected: str
+) -> None:
+    from datetime import UTC, datetime
+
+    import beadsflow.application.review as review
+    from beadsflow.domain.models import Comment, Issue, IssueStatus, IssueType
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    issue = Issue(
+        id="child-1",
+        title="Synthetic title",
+        status=IssueStatus.IN_PROGRESS,
+        priority=0,
+        issue_type=IssueType.TASK,
+        created_at=now,
+        updated_at=now,
+        dependencies=[],
+        dependents=[],
+        description="Synthetic description",
+        acceptance_criteria="Synthetic criteria",
+        comments=[
+            Comment(1, "older-ready", "Ready for review: obsolete", now),
+            Comment(2, "older-review", "LGTM", now),
+            Comment(10, "current-ready", "Ready for review: " + "雪" * 30 + "READY_TAIL", now),
+            Comment(11, "current-review", "Changes requested: " + "雪" * 30 + "REVIEW_TAIL", now),
+            Comment(12, "bystander", "No marker here", now),
+        ],
+    )
+    events: list[object] = []
+
+    class FakeBeads:
+        def __init__(self, *, beads_dir: str, no_db: bool) -> None:
+            events.append((beads_dir, no_db))
+
+        def get_issue(self, issue_id: str) -> Issue:
+            events.append(issue_id)
+            return issue
+
+    git_outputs = {
+        ("status", "-sb"): "## synthetic-branch",
+        ("diff", "--stat"): "unstaged-stat",
+        ("diff", "--staged", "--stat"): "staged-stat",
+        ("diff", "--patch"): "unstaged-patch-" + "雪" * 30 + "PATCH_TAIL",
+        ("diff", "--staged", "--patch"): "staged-patch",
+    }
+
+    def fake_git(args: list[str]) -> str:
+        events.append(tuple(args))
+        return git_outputs[tuple(args)]
+
+    recorded: list[dict[str, object]] = []
+
+    def reviewer(**kwargs: object) -> str:
+        recorded.append(kwargs)
+        return output
+
+    monkeypatch.setattr(review, "BeadsCli", FakeBeads)
+    monkeypatch.setattr(review, "_run_git", fake_git)
+    monkeypatch.setattr(review, "_run_reviewer_command", reviewer)
+    request = review.ReviewRequest(
+        "child-1", "epic-1", "synthetic-beads", True, "fake-review --flag", "--prompt", 55, 45, 17
+    )
+    assert review.run_review(request) == expected
+    assert events[:2] == [("synthetic-beads", True), "child-1"]
+    assert set(events[2:]) == set(git_outputs)
+    assert len(recorded) == 1
+    call = recorded[0]
+    assert call["cli_command"] == "fake-review --flag"
+    assert call["prompt_arg"] == "--prompt"
+    assert call["timeout_seconds"] == 17
+    prompt = call["prompt"]
+    assert isinstance(prompt, str)
+    for required in (
+        "Review bead child-1 under epic epic-1.",
+        "Title: Synthetic title",
+        "Status: in_progress",
+        "Synthetic description",
+        "Synthetic criteria",
+        "current-ready",
+        "current-review",
+        "## synthetic-branch",
+        "Unstaged:\nunstaged-stat",
+        "Staged:\nstaged-stat",
+    ):
+        assert required in prompt
+    assert "obsolete" not in prompt and "older-review" not in prompt and "bystander" not in prompt
+    for heading, next_heading, prefix in (
+        ("READY_COMMENT", "LAST_REVIEW_COMMENT", "Ready for review:"),
+        ("LAST_REVIEW_COMMENT", "Git status:", "Changes requested:"),
+    ):
+        section = prompt.split(heading, 1)[1].split(next_heading, 1)[0].strip()
+        body = section.split("\n", 1)[1]
+        assert body.startswith(prefix) and body.endswith(TRUNCATED_NOTICE)
+        assert len(body.encode("utf-8")) <= 45
+        assert "雪" in body
+    patch = prompt.split("Git diff (patch, truncated):\n", 1)[1].split("Respond with a single", 1)[0].strip()
+    assert "Unstaged:\nunstaged-patch-" in patch
+    assert len(patch.encode("utf-8")) <= 55
+    assert patch.endswith(TRUNCATED_NOTICE)
+    assert prompt.count(TRUNCATED_NOTICE) == 3
+    assert "PATCH_TAIL" not in prompt and "READY_TAIL" not in prompt and "REVIEW_TAIL" not in prompt
+    assert "\ufffd" not in prompt
+
+
+def test_run_review_stops_on_missing_git(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import UTC, datetime
+
+    import beadsflow.application.review as review
+    from beadsflow.domain.models import Issue, IssueStatus, IssueType
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    issue = Issue("child-1", "Synthetic", IssueStatus.OPEN, 0, IssueType.TASK, now, now, [], [], [])
+    monkeypatch.setattr(review.BeadsCli, "get_issue", lambda self, issue_id: issue)
+
+    def missing(*args: object, **kwargs: object) -> str:
+        raise CommandError("Cannot execute git (FileNotFoundError)")
+
+    def forbidden(**kwargs: object) -> str:
+        pytest.fail("reviewer must not run without Git context")
+
+    monkeypatch.setattr(review, "capture_git", missing)
+    monkeypatch.setattr(review, "_run_reviewer_command", forbidden)
+    request = review.ReviewRequest("child-1", "epic-1", "synthetic", False, "fake", "-p", 55, 45)
+    with pytest.raises(CommandError, match="Cannot execute git"):
+        review.run_review(request)

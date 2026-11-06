@@ -14,23 +14,49 @@ from beadsflow.domain.models import Comment, Dependency, Issue, IssueStatus, Iss
 from beadsflow.infra.run_command import CommandResult, run_command
 
 
-def _parse_datetime(value: str) -> datetime:
-    # bd emits RFC3339-ish with timezone; datetime.fromisoformat handles "+01:00" and "Z" (py3.11+).
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+def _text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("expected text")
+    return value
 
 
-def _parse_status(value: str) -> IssueStatus:
-    try:
-        return IssueStatus(value)
-    except ValueError as exc:  # pragma: no cover
-        raise BeadsError(f"Unknown issue status: {value}") from exc
+def _identity(value: object) -> str:
+    value = _text(value)
+    if not value.strip():
+        raise ValueError("expected nonempty identity")
+    return value
 
 
-def _parse_issue_type(value: str) -> IssueType:
-    try:
-        return IssueType(value)
-    except ValueError as exc:  # pragma: no cover
-        raise BeadsError(f"Unknown issue type: {value}") from exc
+def _integer(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError("expected nonnegative integer")
+    return value
+
+
+def _parse_datetime(value: object) -> datetime:
+    # Require timezone-aware values so every timestamp can be compared safely.
+    parsed = datetime.fromisoformat(_text(value).replace("Z", "+00:00"))
+    if parsed.utcoffset() is None:
+        raise ValueError("expected timezone-aware timestamp")
+    return parsed
+
+
+def _object(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("expected object")
+    return value
+
+
+def _records(raw: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    values = raw.get(key, [])
+    if not isinstance(values, list):
+        raise ValueError("expected list")
+    records = [_object(value) for value in values]
+    # Duplicate identities make both selection and comment ordering ambiguous.
+    ids = [record["id"] for record in records]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate identity")
+    return records
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,10 +129,13 @@ class BeadsCli:
 
     def get_issue(self, issue_id: str) -> Issue:
         data = self._run_json("show", issue_id)
-        if not isinstance(data, list) or not data:
-            raise BeadsError(f"Unexpected bd show payload for {issue_id}")
-        raw = data[0]
-        return self._parse_issue(raw)
+        try:
+            if not isinstance(data, list) or len(data) != 1:
+                raise ValueError("expected one issue")
+            return self._parse_issue(_object(data[0]))
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            # Never echo malformed field values or whole external payloads.
+            raise BeadsError(f"Invalid bd show payload for {issue_id[:200]} ({type(exc).__name__})") from exc
 
     def comment(self, issue_id: str, text: str) -> None:
         self._run("comments", "add", issue_id, text)
@@ -117,44 +146,46 @@ class BeadsCli:
     def _parse_issue(self, raw: dict[str, Any]) -> Issue:
         dependencies = [
             Dependency(
-                id=str(dep["id"]),
-                status=_parse_status(str(dep["status"])),
-                dependency_type=str(dep.get("dependency_type") or "blocks"),
+                id=_identity(dep["id"]),
+                status=IssueStatus(_text(dep["status"])),
+                dependency_type=(_text(dep["dependency_type"]) or "blocks")
+                if dep.get("dependency_type") is not None
+                else "blocks",
             )
-            for dep in raw.get("dependencies", [])
+            for dep in _records(raw, "dependencies")
         ]
         dependents = [
             IssueSummary(
-                id=str(child["id"]),
-                title=str(child["title"]),
-                status=_parse_status(str(child["status"])),
+                id=_identity(child["id"]),
+                title=_text(child["title"]),
+                status=IssueStatus(_text(child["status"])),
                 # Beads omits priority for default P0; treat missing as 0.
-                priority=int(child.get("priority", 0)),
-                created_at=_parse_datetime(str(child["created_at"])),
+                priority=_integer(child.get("priority", 0)),
+                created_at=_parse_datetime(child["created_at"]),
             )
-            for child in raw.get("dependents", [])
+            for child in _records(raw, "dependents")
         ]
         comments = [
             Comment(
-                id=int(comment["id"]),
-                author=str(comment.get("author", "")),
-                text=str(comment.get("text", "")),
-                created_at=_parse_datetime(str(comment["created_at"])),
+                id=_integer(comment["id"]),
+                author=_text(comment.get("author", "")),
+                text=_text(comment.get("text", "")),
+                created_at=_parse_datetime(comment["created_at"]),
             )
-            for comment in raw.get("comments", [])
+            for comment in _records(raw, "comments")
         ]
         return Issue(
-            id=str(raw["id"]),
-            title=str(raw["title"]),
-            status=_parse_status(str(raw["status"])),
+            id=_identity(raw["id"]),
+            title=_text(raw["title"]),
+            status=IssueStatus(_text(raw["status"])),
             # Beads omits priority for default P0; treat missing as 0.
-            priority=int(raw.get("priority", 0)),
-            issue_type=_parse_issue_type(str(raw["issue_type"])),
-            created_at=_parse_datetime(str(raw["created_at"])),
-            updated_at=_parse_datetime(str(raw["updated_at"])),
+            priority=_integer(raw.get("priority", 0)),
+            issue_type=IssueType(_text(raw["issue_type"])),
+            created_at=_parse_datetime(raw["created_at"]),
+            updated_at=_parse_datetime(raw["updated_at"]),
             dependencies=dependencies,
             dependents=dependents,
             comments=comments,
-            description=str(raw.get("description", "")),
-            acceptance_criteria=str(raw.get("acceptance_criteria", "")),
+            description=_text(raw.get("description", "")),
+            acceptance_criteria=_text(raw.get("acceptance_criteria", "")),
         )

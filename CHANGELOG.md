@@ -17,12 +17,18 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Added
 
+- Exercise the real review orchestration with synthetic Beads/Git/reviewer boundaries, including prompt sections, UTF-8 limits, timeout forwarding and invalid verdicts.
+
 - Add read-only push/PR quality CI with frozen uv dependencies, Ruff lint/format, mypy, and isolated unit tests.
 - Add optional profile settings for comment handling (`comment_mode`, `comment_prefix`, `comment_suffix`) and `require_git_changes` gating for implementers.
 - Support `beads_no_db`/`BEADSFLOW_BEADS_NO_DB` to run internal `bd` calls with `--no-db`.
 - Truncate stdout-based comments by default to avoid oversized Beads entries; configure via `BEADSFLOW_MAX_COMMENT_BYTES` and `BEADSFLOW_MAX_COMMENT_LINES`.
 
 ### Fixed
+
+- Order equal-timestamp comments by numeric ID consistently for phase selection and review context.
+- Validate consumed Beads issue schemas and identities at the adapter boundary; reject malformed fields, duplicate IDs and timezone-less timestamps with bounded domain errors before using that context.
+- Bound noninteractive Zellij status/stop calls to 10 seconds and report timeout/startup failures as operation errors; preserve interactive attach/start lifetimes.
 
 - Bound each review-context and runner-signature Git command to 30 seconds with owned process-group cleanup, disable external diff/textconv helpers, preserve raw signature output while replacing invalid UTF-8 in review text, and stop on incomplete Git context.
 
