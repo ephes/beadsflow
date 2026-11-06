@@ -22,7 +22,7 @@ from beadsflow.settings import Profile, Settings
 
 
 @pytest.mark.parametrize("boundary", ["review", "signature"])
-@pytest.mark.parametrize("failure", ["timeout", "exit", "launch"])
+@pytest.mark.parametrize("failure", ["timeout", "exit", "launch", "overflow"])
 def test_git_failure_stops_before_agent(
     boundary: str, failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -51,13 +51,15 @@ stop()
         if failure == "launch":
             raise OSError("synthetic launch failure")
         replacement = [sys.executable, "-c", script, str(pids)]
-        if failure == "exit":
-            replacement = [sys.executable, "-c", "import sys; sys.exit(2)"]
+        if failure in {"exit", "overflow"}:
+            source = {"exit": "import sys; sys.exit(2)", "overflow": "print('x' * 1024)"}[failure]
+            replacement = [sys.executable, "-c", source]
         return original(replacement, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", fake_git)
     # Lower only the production Git budget, retaining the real cleanup path.
     monkeypatch.setattr(git_command, "GIT_TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setattr(git_command, "GIT_MAX_OUTPUT_BYTES", 512)
     started = time.monotonic()
     if boundary == "review":
         monkeypatch.setattr(

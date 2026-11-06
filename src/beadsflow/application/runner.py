@@ -14,6 +14,7 @@ from beadsflow.application.phase import Phase
 from beadsflow.application.select import determine_next_work, marker_from_text, select_next_child
 from beadsflow.domain.models import Issue, IssueStatus, IssueType, Marker
 from beadsflow.infra.beads_cli import BeadsCli
+from beadsflow.infra.command_log import write_command_log
 from beadsflow.infra.git_command import capture_git
 from beadsflow.infra.git_signature import untracked_signature
 from beadsflow.infra.paths import RepoPaths
@@ -235,11 +236,15 @@ class EpicRunLoop:
 
     def _run_profile_command(self, *, profile: Profile, issue_id: str, phase: str) -> CommandResult:
         argv = profile.command.render(epic_id=self.epic_id, issue_id=issue_id)
-        self.logger.info(f"Running {phase}: {' '.join(argv)}")
+        self.logger.info(f"Running {phase} profile (arguments omitted).")
         result = self._exec(argv=argv, issue_id=issue_id)
         if result.returncode == 0:
             return result
-        log_path = self._write_command_log(issue_id=issue_id, phase=phase, result=result)
+        log_path = None
+        try:
+            log_path = self._write_command_log(issue_id=issue_id, phase=phase, result=result)
+        except CommandError as exc:
+            self.logger.error(str(exc))
         failure = self._format_failure(phase, result, log_path=log_path)
         self.logger.error(failure)
         try:
@@ -247,7 +252,8 @@ class EpicRunLoop:
         except Exception as exc:  # noqa: BLE001
             self.logger.error(f"Failed to post failure comment to Beads: {exc}")
         phase_label = phase.capitalize()
-        raise CommandError(f"{phase_label} failed with code {result.returncode} (log: {log_path})")
+        log_detail = f" (log: {log_path})" if log_path is not None else ""
+        raise CommandError(f"{phase_label} failed with code {result.returncode}{log_detail}")
 
     def _maybe_capture_git_signature(self, profile: Profile) -> str | None:
         if not profile.require_git_changes:
@@ -370,10 +376,6 @@ class EpicRunLoop:
         return message
 
     def _write_command_log(self, *, issue_id: str, phase: str, result: CommandResult) -> Path:
-        logs_dir = self.repo_paths.beads_dir / "logs" / "beadsflow"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        path = logs_dir / f"{issue_id}.{phase}.{timestamp}.log"
         stdout = result.stdout or ""
         stderr = result.stderr or ""
         content = "\n".join(
@@ -394,8 +396,7 @@ class EpicRunLoop:
                 "",
             ]
         )
-        path.write_text(content, encoding="utf-8")
-        return path
+        return write_command_log(beads_dir=self.repo_paths.beads_dir, issue_id=issue_id, phase=phase, content=content)
 
     def _log_dry_run(self, *, phase: Phase, issue_id: str) -> None:
         if phase is Phase.CLOSE:
@@ -409,8 +410,7 @@ class EpicRunLoop:
             if implementer is None:
                 self.logger.info(f"[dry-run] Unknown implementer profile: {self.implementer_name}")
                 return
-            argv = implementer.command.render(epic_id=self.epic_id, issue_id=issue_id)
-            self.logger.info(f"[dry-run] Would run implementer: {' '.join(argv)}")
+            self.logger.info("[dry-run] Would run implementer profile (arguments omitted).")
             return
         if phase is Phase.REVIEW:
             if self.reviewer_name is None:
@@ -420,6 +420,5 @@ class EpicRunLoop:
             if reviewer is None:
                 self.logger.info(f"[dry-run] Unknown reviewer profile: {self.reviewer_name}")
                 return
-            argv = reviewer.command.render(epic_id=self.epic_id, issue_id=issue_id)
-            self.logger.info(f"[dry-run] Would run reviewer: {' '.join(argv)}")
+            self.logger.info("[dry-run] Would run reviewer profile (arguments omitted).")
             return

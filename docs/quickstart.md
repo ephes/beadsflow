@@ -244,6 +244,27 @@ Trusted ancestors above those two levels are resolved first, so system aliases s
 
 Runner profile commands on macOS/Linux execute in an owned process group. On timeout or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. This applies to runner profiles, not the standalone `beadsflow review` helper.
 
+Runner profiles and internal Beads commands have a hard 8 MiB combined stdout/stderr
+capture limit per command. Git context/signature commands have a separate 64 MiB cap
+to accommodate large tracked diffs. Dirty trees exceeding the Git cap stop runs/reviews
+with an explicit exit-125 error rather than using incomplete context. Both pipes are drained together;
+retained bytes stay within that limit, including during TERM/KILL cleanup. Exceeding it
+stops the owned process group and returns code 125 with an overflow diagnostic. The
+phase fails before interpreting stdout, so even a captured `LGTM` cannot approve work.
+Failure logs retain only the bounded capture plus the diagnostic, not the full output.
+The standalone `beadsflow review` helper's reviewer subprocess is separate from this cap.
+
+Failed profile diagnostics are stored as unique files under
+`<beads_dir>/logs/beadsflow/`, with a timestamp and random suffix in each filename. New files use mode 0600; the log directory is owned by the
+current user and set to 0700, including when upgrading an existing directory. Beads and
+log directory symlinks are refused, and existing files are never overwritten. Logs include
+argv and captured output, which may contain secrets: keep them private and delete them
+manually when no longer needed. There is no automatic rotation or expiry. Previously
+created logs are not rewritten; inspect their permissions and contents when upgrading.
+If a log cannot be written safely, beadsflow still reports the original profile failure
+and posts its failure comment without a log path. Normal and dry-run progress messages omit profile arguments. Commands can still print
+sensitive output, and failure comments can contain excerpts: avoid echoing credentials.
+
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to one second for output draining. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync failure triggers automatic import/retry; other failures stop immediately. `run.command_timeout_seconds` continues to apply only to profiles.
 
 

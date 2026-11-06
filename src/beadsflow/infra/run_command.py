@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import os
+import selectors
 import shlex
 import signal
 import subprocess
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from beadsflow.application.errors import ConfigError
+
+DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+
+
+class _OutputLimitExceeded(Exception):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +55,10 @@ def run_command(
     env: dict[str, str],
     cwd: Path | None = None,
     preserve_output: bool = False,
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
 ) -> CommandResult:
+    if max_output_bytes <= 0:
+        raise ValueError("max_output_bytes must be positive")
     process = subprocess.Popen(
         list(argv),
         stdout=subprocess.PIPE,
@@ -63,17 +74,57 @@ def run_command(
         # Preserve the previous text-mode behavior for profile and Beads commands.
         return value.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
+    output = (bytearray(), bytearray())
+    code: int
+    notice = ""
     try:
-        stdout, stderr = process.communicate(timeout=timeout_seconds)
+        _drain(process, output, timeout_seconds, max_output_bytes)
+        code = process.returncode
+    except _OutputLimitExceeded:
+        _stop_group(process, output, max_output_bytes)
+        code = 125
+        notice = f"\nCommand output exceeded {max_output_bytes} bytes; capture truncated."
     except subprocess.TimeoutExpired:
-        stdout, stderr = _stop_group(process)
-        if not stderr:
-            stderr = f"Timed out after {timeout_seconds} seconds.".encode()
-        return CommandResult(argv=argv, returncode=124, stdout=decode(stdout), stderr=decode(stderr))
+        _stop_group(process, output, max_output_bytes)
+        code = 124
+        if not output[1]:
+            notice = f"Timed out after {timeout_seconds} seconds."
     except BaseException:
-        _stop_group(process)
+        _stop_group(process, output, max_output_bytes)
         raise
-    return CommandResult(argv=argv, returncode=process.returncode, stdout=decode(stdout), stderr=decode(stderr))
+    return CommandResult(
+        argv=argv, returncode=code, stdout=decode(bytes(output[0])), stderr=decode(bytes(output[1])) + notice
+    )
+
+
+def _drain(
+    process: subprocess.Popen[bytes],
+    output: tuple[bytearray, bytearray],
+    timeout_seconds: float,
+    limit: int,
+    *,
+    fail_on_overflow: bool = True,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    with selectors.DefaultSelector() as selector:
+        for pipe, buffer in zip((process.stdout, process.stderr), output, strict=True):
+            if pipe is not None and not pipe.closed:
+                selector.register(pipe, selectors.EVENT_READ, (buffer, pipe))
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, timeout_seconds)
+            for key, _events in selector.select(remaining):
+                chunk = os.read(key.fd, 65536)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    key.data[1].close()
+                    continue
+                available = max(0, limit - len(output[0]) - len(output[1]))
+                key.data[0].extend(chunk[:available])
+                if len(chunk) > available and fail_on_overflow:
+                    raise _OutputLimitExceeded
+    process.wait(timeout=max(0, deadline - time.monotonic()))
 
 
 def _signal_group(process: subprocess.Popen[bytes] | subprocess.Popen[str], sig: signal.Signals) -> None:
@@ -87,21 +138,19 @@ def _signal_group(process: subprocess.Popen[bytes] | subprocess.Popen[str], sig:
             raise
 
 
-def _stop_group(process: subprocess.Popen[bytes]) -> tuple[bytes, bytes]:
-    # Give wrappers a short opportunity to reap their children, then kill any
-    # remaining group members even when the wrapper has already exited.
+def _stop_group(process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int) -> None:
+    # Cleanup keeps draining under the same cap, never communicating unbounded output.
     _signal_group(process, signal.SIGTERM)
     try:
         try:
-            return process.communicate(timeout=0.5)
+            _drain(process, output, 0.5, limit, fail_on_overflow=False)
         except subprocess.TimeoutExpired:
             _signal_group(process, signal.SIGKILL)
             try:
-                return process.communicate(timeout=0.5)
-            except subprocess.TimeoutExpired as exc:
-                # Escaped descendants may retain pipe handles. Preserve captured
-                # output without waiting indefinitely for their EOF.
-                return _timeout_output(exc)
+                _drain(process, output, 0.5, limit, fail_on_overflow=False)
+            except subprocess.TimeoutExpired:
+                # Escaped descendants may retain pipe handles; do not await their EOF.
+                pass
     finally:
         try:
             _signal_group(process, signal.SIGKILL)
@@ -111,10 +160,3 @@ def _stop_group(process: subprocess.Popen[bytes]) -> tuple[bytes, bytes]:
                 process.stdout.close()
             if process.stderr is not None:
                 process.stderr.close()
-
-
-def _timeout_output(exc: subprocess.TimeoutExpired) -> tuple[bytes, bytes]:
-    def as_bytes(value: str | bytes | None) -> bytes:
-        return value.encode("utf-8") if isinstance(value, str) else value or b""
-
-    return as_bytes(exc.stdout), as_bytes(exc.stderr)

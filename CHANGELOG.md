@@ -8,6 +8,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Bound command stdout/stderr capture to a combined 8 MiB (64 MiB for Git context/signatures), stop owned process groups on overflow, and reject truncated profile approvals (exit 125).
+- Create unique exclusive mode-0600 failure logs in an owned mode-0700 directory; refuse redirected directories, preserve earlier logs, and omit profile arguments from progress messages. Preserve profile failure reporting when a log cannot be written. Existing log files require manual retention/permission review.
+
 - Refresh affected development/docs lock chains (filelock, Pygments, pytest, virtualenv, idna, requests, soupsieve, urllib3). Related tooling constraints update distlib/packaging and add python-discovery for virtualenv. The frozen all-groups registry audit is clean; runtime dependencies remain empty. Re-sync development environments.
 
 - Update the locked certifi CA bundle to 2026.10.19 for the eMudhra/emSign CA compromise ([GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)). Lock-only change; re-sync environments created from the lock.

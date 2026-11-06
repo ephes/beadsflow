@@ -182,3 +182,19 @@ def test_review_context_handles_non_utf8_patch(loop: EpicRunLoop, monkeypatch: p
     git(root, "add", "latin1.txt")
     _status, _stat, patch = _collect_git_context(8000)
     assert "caf\N{REPLACEMENT CHARACTER}" in patch
+
+
+def test_large_tracked_diff_keeps_signature_working(loop: EpicRunLoop) -> None:
+    from beadsflow.infra.git_command import capture_git
+
+    root = loop.repo_paths.repo_root
+    path = root / "tracked"
+    path.write_text("small\n")
+    git(root, "add", "tracked")
+    git(root, "commit", "-m", "Initial")
+    before = loop._git_signature()
+    path.write_bytes(b"synthetic line\n" * 700_000)
+    assert len(capture_git(["diff", "--binary"], cwd=root)) > 8 * 1024 * 1024
+    after = loop._git_signature()
+    assert after != before
+    assert loop._git_signature() == after

@@ -6,6 +6,7 @@ from beadsflow.application.errors import CommandError
 from beadsflow.infra.run_command import run_command
 
 GIT_TIMEOUT_SECONDS = 30
+GIT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 
 
 def capture_git(
@@ -22,6 +23,7 @@ def capture_git(
             env={},
             cwd=cwd,
             preserve_output=preserve_output,
+            max_output_bytes=GIT_MAX_OUTPUT_BYTES,
         )
     except OSError as exc:
         raise CommandError(f"Cannot execute {operation} ({type(exc).__name__})") from exc
