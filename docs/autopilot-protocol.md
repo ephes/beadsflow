@@ -27,6 +27,11 @@ tie-breaker (larger IDs are newer). Input array order does not affect phase
 selection or the helper's latest Ready for review / previous review context.
 This ordering is separate from the fail-closed marker grammar above.
 
+The Beads adapter validates consumed issue, dependency, child and comment fields
+before returning context to selection or review. Malformed data stops the run
+with a bounded `BeadsError` diagnostic before using that data for a comment,
+close or profile invocation. See the [quickstart](quickstart.md) for the input contract.
+
 ## Minimal end-to-end example
 
 This shows the smallest practical “implement → review → approve” loop with commands you can run locally.

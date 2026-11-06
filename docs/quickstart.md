@@ -267,6 +267,19 @@ sensitive output, and failure comments can contain excerpts: avoid echoing crede
 
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to one second for output draining. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync failure triggers automatic import/retry; other failures stop immediately. `run.command_timeout_seconds` continues to apply only to profiles.
 
+`bd show` must return exactly one issue object. Beads resolves short/partial
+request IDs; its returned canonical identity is preserved. Consumed identities must be nonempty strings, and issue/child statuses and issue
+types must be supported enum values. Priority is a nonnegative JSON integer
+(omitted priority still means P0); comment IDs are nonnegative JSON integers.
+Timestamps must be parseable ISO 8601 values with a timezone, including `Z` or
+an explicit offset, so all issue/child/comment times can be compared safely.
+Optional dependency/child/comment lists may be omitted but must be arrays of
+objects when present; duplicate IDs within a list are refused. Consumed text
+fields must be strings (omitted optional text remains empty). Missing, empty or
+null dependency types retain their legacy blocking meaning. Malformed data
+produces a bounded schema diagnostic without echoing payload values. No comment,
+close or profile is launched using that malformed context.
+
 
 Git status, diff, HEAD and untracked-path commands used for review context and
 `require_git_changes` each have a separate 30-second execution budget (at most
