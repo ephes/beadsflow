@@ -34,7 +34,7 @@ export PATH="$PWD/.venv/bin:$PATH"
 .venv/bin/pytest
 ```
 
-Unit tests mock Beads and agent interactions; subprocess fixtures run only local Python commands in temporary directories. No Beads initialization, real database, agent login, owner environment, or subscription command is needed. Treat failed quality checks as blocking review evidence. This workflow does not publish or deploy.
+Unit tests mock Beads and agent interactions; subprocess fixtures run only local Python commands in temporary directories. Regression fixtures cover combined output limits, process cleanup, fail-closed approvals, private log permissions, uniqueness and symlink refusal. No Beads initialization, real database, agent login, owner environment, or subscription command is needed. Treat failed quality checks as blocking review evidence. This workflow does not publish or deploy.
 
 The runtime has no third-party dependencies. The committed lock also covers development
 and documentation tools; auditing it does not audit isolated pre-commit hook environments.

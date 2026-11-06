@@ -60,10 +60,12 @@ def test_timeout_cleans_descendant(tmp_path: Path) -> None:
 
 def test_interrupt_cleans_descendant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     marker, pids = tmp_path / "marker", tmp_path / "pids"
-    original = subprocess.Popen.communicate
+    import beadsflow.infra.run_command as module
+
+    original = module._drain
     interrupted = False
 
-    def interrupt(self: subprocess.Popen[str], *args: object, **kwargs: object) -> tuple[str, str]:
+    def interrupt(*args: object, **kwargs: object) -> None:
         nonlocal interrupted
         if not interrupted:
             interrupted = True
@@ -71,9 +73,9 @@ def test_interrupt_cleans_descendant(tmp_path: Path, monkeypatch: pytest.MonkeyP
             while not pids.exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
             raise KeyboardInterrupt
-        return original(self, *args, **kwargs)  # type: ignore[arg-type]
+        return original(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(subprocess.Popen, "communicate", interrupt)
+    monkeypatch.setattr(module, "_drain", interrupt)
     with pytest.raises(KeyboardInterrupt):
         run_command(argv=[sys.executable, "-c", PARENT, str(marker), str(pids), CHILD], timeout_seconds=10, env={})
     assert interrupted
@@ -159,3 +161,45 @@ def test_output_decoding_and_cwd(tmp_path: Path, preserve_output: bool) -> None:
         assert result.stdout.encode("utf-8", errors="surrogateescape") == payload
     else:
         assert result.stdout == "patch\nname\n\N{REPLACEMENT CHARACTER}\0"
+
+
+@pytest.mark.parametrize("stream", [1, 2])
+def test_output_limit_bounds_capture_and_cleans_descendant(tmp_path: Path, stream: int) -> None:
+    import tracemalloc
+
+    marker, pids = tmp_path / "marker", tmp_path / "pids"
+    flood = PARENT.replace(
+        "time.sleep(30)",
+        f"for _ in range(1024):\n    os.write({stream}, b'x' * 65536)\nprint('LGTM', flush=True)",
+    )
+    tracemalloc.start()
+    try:
+        result = run_command(
+            argv=[sys.executable, "-c", flood, str(marker), str(pids), CHILD],
+            timeout_seconds=5,
+            env={},
+            max_output_bytes=8192,
+        )
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert result.returncode == 125
+    assert "output exceeded" in result.stderr.lower()
+    assert len(result.stdout.encode()) + len(result.stderr.encode()) < 8500
+    assert peak < 1024 * 1024
+    assert_gone(pids)
+    assert not marker.exists()
+
+
+def test_combined_output_budget_and_exact_boundary() -> None:
+    for stderr_bytes, expected in [(4096, 0), (4097, 125)]:
+        result = run_command(
+            argv=[sys.executable, "-c", f"import os; os.write(1, b'a'*4096); os.write(2, b'b'*{stderr_bytes})"],
+            timeout_seconds=5,
+            env={},
+            max_output_bytes=8192,
+        )
+        assert result.returncode == expected
+        if expected == 0:
+            assert result.stdout == "a" * 4096
+            assert result.stderr == "b" * 4096

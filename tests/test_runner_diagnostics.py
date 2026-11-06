@@ -319,3 +319,170 @@ def test_runner_rejects_conflict_lost_by_truncation(monkeypatch: pytest.MonkeyPa
             phase="reviewer",
         )
     assert fake.comments == []
+
+
+def diagnostic_loop(tmp_path: Path) -> EpicRunLoop:
+    import logging
+
+    return EpicRunLoop(
+        beads=_FakeBeads(comments=[]),  # type: ignore[arg-type]
+        epic_id="epic",
+        settings=Settings.defaults(),
+        repo_paths=RepoPaths(repo_root=tmp_path, beads_dir=tmp_path / ".beads"),
+        implementer_name=None,
+        reviewer_name=None,
+        logger=logging.getLogger("test.private-diagnostics"),
+    )
+
+
+def test_output_overflow_cannot_post_approval(tmp_path: Path) -> None:
+    import sys
+    from dataclasses import replace
+
+    beads = _FakeBeadsWithIssues(comments={})
+    loop = replace(diagnostic_loop(tmp_path), beads=beads)  # type: ignore[arg-type]
+    profile = Profile(
+        command=CommandSpec(
+            argv=[sys.executable, "-c", "print('LGTM'); print('x' * (9 * 1024 * 1024)); print('LGTM')"]
+        ),
+        comment_mode="stdout",
+        comment_prefix="",
+        comment_suffix="",
+        require_git_changes=False,
+    )
+    loop = replace(loop, reviewer_name="test", settings=replace(loop.settings, reviewers={"test": profile}))
+    with pytest.raises(CommandError, match="failed with code 125"):
+        loop._run_reviewer(issue_id="issue")
+    assert len(beads.comments["issue"]) == 1
+    assert "command failed (exit 125)" in beads.comments["issue"][0].text
+
+
+def test_failure_logs_are_private_and_unique(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+    import stat
+    import time
+
+    from beadsflow.infra.run_command import CommandResult
+
+    loop = diagnostic_loop(tmp_path)
+    directory = loop.repo_paths.beads_dir / "logs" / "beadsflow"
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(time, "strftime", lambda *_args: "20000101-000000")
+    result = CommandResult(argv=["synthetic", "private-argument"], returncode=1, stdout="out", stderr="err")
+    mask = os.umask(0o022)
+    try:
+        first = loop._write_command_log(issue_id="issue", phase="reviewer", result=result)
+        second = loop._write_command_log(issue_id="issue", phase="reviewer", result=result)
+    finally:
+        os.umask(mask)
+    assert first != second
+    assert "20000101-000000" in first.name
+    assert "20000101-000000" in second.name
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    for path in (first, second):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert "private-argument" in path.read_text()
+        assert "stdout:\n  out" in path.read_text()
+
+
+@pytest.mark.parametrize("component", [".beads", "logs", "beadsflow"])
+def test_failure_log_rejects_redirected_directory(tmp_path: Path, component: str) -> None:
+    from beadsflow.infra.run_command import CommandResult
+
+    loop = diagnostic_loop(tmp_path)
+    directory = loop.repo_paths.beads_dir / "logs" / "beadsflow"
+    target = tmp_path / "outside"
+    target.mkdir()
+    parts = {".beads": loop.repo_paths.beads_dir, "logs": directory.parent, "beadsflow": directory}
+    redirected = parts[component]
+    redirected.parent.mkdir(parents=True, exist_ok=True)
+    redirected.symlink_to(target, target_is_directory=True)
+    with pytest.raises(CommandError, match="diagnostic log"):
+        loop._write_command_log(
+            issue_id="issue",
+            phase="reviewer",
+            result=CommandResult(argv=[], returncode=1, stdout="private", stderr=""),
+        )
+    assert list(target.iterdir()) == []
+
+
+@pytest.mark.parametrize("issue_id,phase", [("../escape", "reviewer"), ("issue", "../../escape")])
+def test_failure_log_refuses_path_components(tmp_path: Path, issue_id: str, phase: str) -> None:
+    from beadsflow.infra.run_command import CommandResult
+
+    with pytest.raises(CommandError, match="diagnostic log"):
+        diagnostic_loop(tmp_path)._write_command_log(
+            issue_id=issue_id, phase=phase, result=CommandResult(argv=[], returncode=1, stdout="private", stderr="")
+        )
+
+
+def test_profile_arguments_are_not_displayed(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+    import sys
+    from dataclasses import replace
+
+    from beadsflow.application.phase import Phase
+
+    loop = diagnostic_loop(tmp_path)
+    profile = Profile(
+        command=CommandSpec(argv=[sys.executable, "-c", "pass", "synthetic-secret"]),
+        comment_mode="command",
+        comment_prefix="",
+        comment_suffix="",
+        require_git_changes=False,
+    )
+    loop = replace(loop, reviewer_name="test", settings=replace(loop.settings, reviewers={"test": profile}))
+    with caplog.at_level(logging.INFO):
+        loop._run_profile_command(profile=profile, issue_id="issue", phase="reviewer")
+        loop._log_dry_run(phase=Phase.REVIEW, issue_id="issue")
+    assert "reviewer" in caplog.text
+    assert "synthetic-secret" not in caplog.text
+
+
+def test_log_creation_collision_is_exclusive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from beadsflow.infra import command_log
+    from beadsflow.infra.run_command import CommandResult
+
+    loop = diagnostic_loop(tmp_path)
+    directory = loop.repo_paths.beads_dir / "logs" / "beadsflow"
+    directory.mkdir(parents=True)
+    outside = tmp_path / "sentinel"
+    outside.write_text("untouched")
+    monkeypatch.setattr(command_log.time, "strftime", lambda *_args: "20000101-000000")
+    collision = directory / "issue.reviewer.20000101-000000.fixed.log"
+    collision.symlink_to(outside)
+    monkeypatch.setattr(command_log.secrets, "token_hex", lambda _size: "fixed")
+    with pytest.raises(CommandError, match="diagnostic log"):
+        loop._write_command_log(
+            issue_id="issue",
+            phase="reviewer",
+            result=CommandResult(argv=[], returncode=1, stdout="private", stderr=""),
+        )
+    assert outside.read_text() == "untouched"
+    assert collision.is_symlink()
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+def test_log_failure_preserves_profile_failure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, overflow: bool
+) -> None:
+    import sys
+
+    loop = diagnostic_loop(tmp_path)
+    directory = loop.repo_paths.beads_dir
+    directory.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (directory / "logs").symlink_to(outside, target_is_directory=True)
+    script = "print('x' * (9 * 1024 * 1024))" if overflow else "import sys; print('failed'); sys.exit(2)"
+    code = 125 if overflow else 2
+    profile = Profile(CommandSpec([sys.executable, "-c", script]), "stdout", "", "", False)
+    with pytest.raises(CommandError, match=f"Reviewer failed with code {code}"):
+        loop._run_profile_command(profile=profile, issue_id="issue", phase="reviewer")
+    assert len(loop.beads.comments) == 1  # type: ignore[attr-defined]
+    comment = loop.beads.comments[0][1]  # type: ignore[attr-defined]
+    assert f"command failed (exit {code})" in comment
+    assert "output exceeded" in comment if overflow else "failed" in comment
+    assert "Log:" not in comment
+    assert "Cannot write diagnostic log" in caplog.text
+    assert list(outside.iterdir()) == []

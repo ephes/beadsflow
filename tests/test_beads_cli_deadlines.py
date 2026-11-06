@@ -157,17 +157,17 @@ def test_beads_deadline_must_be_finite_positive(timeout: float) -> None:
 
 def test_transport_passes_finite_deadline_to_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import math
+    import selectors
 
-    original = subprocess.Popen.communicate
+    original = selectors.DefaultSelector.select
     observed: list[float] = []
 
-    def communicate(self: subprocess.Popen[str], *args: Any, **kwargs: Any) -> tuple[str, str]:
-        timeout = kwargs.get("timeout")
+    def select(self: Any, timeout: float | None = None) -> list[tuple[selectors.SelectorKey, int]]:
         assert timeout is not None and math.isfinite(timeout) and timeout > 0
         observed.append(timeout)
-        return original(self, *args, **kwargs)
+        return original(self, timeout)
 
-    monkeypatch.setattr(subprocess.Popen, "communicate", communicate)
+    monkeypatch.setattr(selectors.DefaultSelector, "select", select)
     monkeypatch.setattr(BeadsCli, "_argv", lambda self, *args: [sys.executable, "-c", "print('[]')"])
     assert BeadsCli(str(tmp_path))._run_json("show", "child-1") == []
     assert observed and observed[0] <= 30
