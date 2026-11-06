@@ -141,3 +141,21 @@ def test_exited_leader_permission_error_is_harmless(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(os, "killpg", denied)
     _signal_group(process, signal.SIGKILL)
+
+
+@pytest.mark.parametrize("preserve_output", [False, True])
+def test_output_decoding_and_cwd(tmp_path: Path, preserve_output: bool) -> None:
+    payload = b"patch\r\nname\r\xff\0"
+    result = run_command(
+        argv=[sys.executable, "-c", f"import os, pathlib; pathlib.Path('ran').touch(); os.write(1, {payload!r})"],
+        timeout_seconds=5,
+        env={},
+        cwd=tmp_path,
+        preserve_output=preserve_output,
+    )
+    assert result.returncode == 0
+    assert (tmp_path / "ran").exists()
+    if preserve_output:
+        assert result.stdout.encode("utf-8", errors="surrogateescape") == payload
+    else:
+        assert result.stdout == "patch\nname\n\N{REPLACEMENT CHARACTER}\0"

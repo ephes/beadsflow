@@ -6,6 +6,7 @@ import signal
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from beadsflow.application.errors import ConfigError
 
@@ -44,30 +45,38 @@ def run_command(
     argv: Sequence[str],
     timeout_seconds: float,
     env: dict[str, str],
+    cwd: Path | None = None,
+    preserve_output: bool = False,
 ) -> CommandResult:
     process = subprocess.Popen(
         list(argv),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
+        cwd=cwd,
         start_new_session=True,
         env={**os.environ, **env},
     )
+
+    def decode(value: bytes) -> str:
+        if preserve_output:
+            return value.decode("utf-8", errors="surrogateescape")
+        # Preserve the previous text-mode behavior for profile and Beads commands.
+        return value.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+
     try:
         stdout, stderr = process.communicate(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         stdout, stderr = _stop_group(process)
         if not stderr:
-            stderr = f"Timed out after {timeout_seconds} seconds."
-        return CommandResult(argv=argv, returncode=124, stdout=stdout, stderr=stderr)
+            stderr = f"Timed out after {timeout_seconds} seconds.".encode()
+        return CommandResult(argv=argv, returncode=124, stdout=decode(stdout), stderr=decode(stderr))
     except BaseException:
         _stop_group(process)
         raise
-    return CommandResult(argv=argv, returncode=process.returncode, stdout=stdout, stderr=stderr)
+    return CommandResult(argv=argv, returncode=process.returncode, stdout=decode(stdout), stderr=decode(stderr))
 
 
-def _signal_group(process: subprocess.Popen[str], sig: signal.Signals) -> None:
+def _signal_group(process: subprocess.Popen[bytes] | subprocess.Popen[str], sig: signal.Signals) -> None:
     try:
         os.killpg(process.pid, sig)
     except ProcessLookupError:
@@ -78,7 +87,7 @@ def _signal_group(process: subprocess.Popen[str], sig: signal.Signals) -> None:
             raise
 
 
-def _stop_group(process: subprocess.Popen[str]) -> tuple[str, str]:
+def _stop_group(process: subprocess.Popen[bytes]) -> tuple[bytes, bytes]:
     # Give wrappers a short opportunity to reap their children, then kill any
     # remaining group members even when the wrapper has already exited.
     _signal_group(process, signal.SIGTERM)
@@ -104,8 +113,8 @@ def _stop_group(process: subprocess.Popen[str]) -> tuple[str, str]:
                 process.stderr.close()
 
 
-def _timeout_output(exc: subprocess.TimeoutExpired) -> tuple[str, str]:
-    def decode(value: str | bytes | None) -> str:
-        return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+def _timeout_output(exc: subprocess.TimeoutExpired) -> tuple[bytes, bytes]:
+    def as_bytes(value: str | bytes | None) -> bytes:
+        return value.encode("utf-8") if isinstance(value, str) else value or b""
 
-    return decode(exc.stdout), decode(exc.stderr)
+    return as_bytes(exc.stdout), as_bytes(exc.stderr)

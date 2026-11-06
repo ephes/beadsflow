@@ -129,3 +129,56 @@ def test_carriage_return_name_is_not_confused_with_newline_name(loop: EpicRunLoo
     assert both != changed
     carriage.write_bytes(b"third!")
     assert loop._git_signature() != both
+
+
+@pytest.mark.parametrize("helper_kind", ["external", "textconv"])
+def test_diff_helpers_disabled(
+    loop: EpicRunLoop, helper_kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shlex
+    import sys
+
+    from beadsflow.application.review import _collect_git_context
+
+    root = loop.repo_paths.repo_root
+    marker = tmp_path / "helper-ran"
+    script = tmp_path / "helper.py"
+    script.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\nprint('converted')\n")
+    command = shlex.join([sys.executable, str(script)])
+    git(root, "config", "diff.external" if helper_kind == "external" else "diff.synthetic.textconv", command)
+    (root / ".gitattributes").write_text("tracked diff=synthetic\n")
+    tracked = root / "tracked"
+    tracked.write_bytes(b"original\0\r\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Synthetic baseline")
+    tracked.write_bytes(b"changed\0\r\n")
+    before = loop._git_signature()
+    monkeypatch.chdir(root)
+    _collect_git_context(8000)
+    assert not marker.exists()
+    tracked.write_bytes(b"changed again\0\r\n")
+    assert loop._git_signature() != before
+    git(root, "add", "tracked")
+    _collect_git_context(8000)
+    assert not marker.exists()
+
+
+def test_review_context_handles_non_utf8_patch(loop: EpicRunLoop, monkeypatch: pytest.MonkeyPatch) -> None:
+    from beadsflow.application.review import _collect_git_context
+
+    root = loop.repo_paths.repo_root
+    tracked = root / "latin1.txt"
+    tracked.write_bytes(b"before\n")
+    git(root, "add", "latin1.txt")
+    git(root, "commit", "-m", "Synthetic text")
+    tracked.write_bytes(b"caf\xe9\n")
+    monkeypatch.chdir(root)
+    _status, _stat, patch = _collect_git_context(8000)
+    assert "caf\N{REPLACEMENT CHARACTER}" in patch
+    patch.encode("utf-8")
+    signature = loop._git_signature()
+    tracked.write_bytes(b"caf\xef\n")
+    assert loop._git_signature() != signature
+    git(root, "add", "latin1.txt")
+    _status, _stat, patch = _collect_git_context(8000)
+    assert "caf\N{REPLACEMENT CHARACTER}" in patch

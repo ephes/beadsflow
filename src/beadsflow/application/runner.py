@@ -4,7 +4,6 @@ import hashlib
 import logging
 import os
 import shutil
-import subprocess
 import textwrap
 import time
 from dataclasses import dataclass
@@ -15,6 +14,7 @@ from beadsflow.application.phase import Phase
 from beadsflow.application.select import determine_next_work, marker_from_text, select_next_child
 from beadsflow.domain.models import Issue, IssueStatus, IssueType, Marker
 from beadsflow.infra.beads_cli import BeadsCli
+from beadsflow.infra.git_command import capture_git
 from beadsflow.infra.git_signature import untracked_signature
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.infra.run_command import CommandResult, run_command
@@ -328,17 +328,7 @@ class EpicRunLoop:
         return f"{status}\n# diff-sha256={digest.hexdigest()}\n"
 
     def _git_capture(self, argv: list[str], *, allow_exit: set[int]) -> str:
-        completed = subprocess.run(
-            argv,
-            check=False,
-            capture_output=True,
-            cwd=self.repo_paths.repo_root,
-        )
-        if completed.returncode not in allow_exit:
-            stderr = completed.stderr.decode("utf-8", errors="replace").strip()
-            raise CommandError(f"{' '.join(argv)} failed: {stderr or 'unknown error'}")
-        # Decode bytes directly: text mode would translate "\r" in paths and patches to "\n".
-        return completed.stdout.decode("utf-8", errors="surrogateescape")
+        return capture_git(argv[1:], cwd=self.repo_paths.repo_root, allow_exit=allow_exit)
 
     def _comment_from_stdout(
         self,

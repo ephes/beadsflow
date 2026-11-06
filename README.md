@@ -35,3 +35,15 @@ export PATH="$PWD/.venv/bin:$PATH"
 ```
 
 Unit tests mock Beads and agent interactions; subprocess fixtures run only local Python commands in temporary directories. No Beads initialization, real database, agent login, owner environment, or subscription command is needed. Treat failed quality checks as blocking review evidence. This workflow does not publish or deploy.
+
+The runtime has no third-party dependencies. The committed lock also covers development
+and documentation tools; auditing it does not audit isolated pre-commit hook environments.
+To audit all locked groups (including platform-marked requirements):
+
+```bash
+uv export --frozen --all-groups --no-hashes --no-emit-project -o /tmp/beadsflow-requirements.txt
+uvx --from pip-audit==2.10.1 pip-audit --disable-pip --no-deps -r /tmp/beadsflow-requirements.txt
+```
+
+Lock refreshes must preserve the dependency-free runtime. After tooling refreshes,
+run the quality checks above and `just docs` to validate tooling compatibility.

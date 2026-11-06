@@ -8,6 +8,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Refresh affected development/docs lock chains (filelock, Pygments, pytest, virtualenv, idna, requests, soupsieve, urllib3). Related tooling constraints update distlib/packaging and add python-discovery for virtualenv. The frozen all-groups registry audit is clean; runtime dependencies remain empty. Re-sync development environments.
+
 - Update the locked certifi CA bundle to 2026.10.19 for the eMudhra/emSign CA compromise ([GHSA-6q48-6c7w-9gw2](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)). Lock-only change; re-sync environments created from the lock.
 
 ### Added
@@ -18,6 +20,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Truncate stdout-based comments by default to avoid oversized Beads entries; configure via `BEADSFLOW_MAX_COMMENT_BYTES` and `BEADSFLOW_MAX_COMMENT_LINES`.
 
 ### Fixed
+
+- Bound each review-context and runner-signature Git command to 30 seconds with owned process-group cleanup, disable external diff/textconv helpers, preserve raw signature output while replacing invalid UTF-8 in review text, and stop on incomplete Git context.
 
 - Bound internal Beads CLI operations and out-of-sync recovery to a shared 30-second deadline; reap timed-out commands, release locks, and never retry ambiguous mutations.
 
