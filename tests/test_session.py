@@ -100,3 +100,75 @@ def test_cli_session_start_forwards_unknown_args(monkeypatch: pytest.MonkeyPatch
     assert captured
     assert captured[0].epic_id == "beadsflow-3cx"
     assert captured[0].run_args == ["--interval", "30", "--verbose"]
+
+
+@pytest.mark.parametrize("operation", ["status", "stop"])
+@pytest.mark.parametrize("failure", ["timeout", "launch"])
+def test_control_failure_returns_nonzero_without_raw_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], operation: str, failure: str
+) -> None:
+    import subprocess
+
+    import beadsflow.infra.zellij as zellij_mod
+
+    monkeypatch.setattr(zellij_mod.shutil, "which", lambda _: "/synthetic/zellij")
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **kwargs: object) -> _Completed:
+        calls.append(argv)
+        assert kwargs.get("timeout") == 10
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(
+                argv, 10, output="synthetic-private-output", stderr="synthetic-private-error"
+            )
+        raise OSError("synthetic-private-error")
+
+    monkeypatch.setattr(zellij_mod.subprocess, "run", run)
+    assert cli_mod.main(["session", operation, "synthetic-session"]) == 1
+    assert calls == [
+        ["zellij", "list-sessions"] if operation == "status" else ["zellij", "kill-session", "synthetic-session"]
+    ]
+    result = capsys.readouterr()
+    assert result.out == ""
+    assert ("list" if operation == "status" else "stop") in result.err
+    assert ("timed out after 10 seconds" if failure == "timeout" else "OSError") in result.err
+    assert "synthetic-private" not in result.err
+
+
+@pytest.mark.parametrize("operation", ["start", "attach"])
+def test_interactive_sessions_have_no_control_timeout(monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
+    import beadsflow.infra.zellij as zellij_mod
+
+    monkeypatch.setattr(zellij_mod.shutil, "which", lambda _: "/synthetic/zellij")
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **kwargs: object) -> _Completed:
+        calls.append(argv)
+        assert "timeout" not in kwargs
+        return _Completed(0)
+
+    monkeypatch.setattr(zellij_mod.subprocess, "run", run)
+    args = ["session", operation, "synthetic-session"]
+    if operation == "start":
+        args.extend(["--epic", "epic-1"])
+    assert cli_mod.main(args) == 0
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("operation", ["status", "stop"])
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_control_success_and_command_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], operation: str, returncode: int
+) -> None:
+    import beadsflow.infra.zellij as zellij_mod
+
+    monkeypatch.setattr(zellij_mod.shutil, "which", lambda _: "/synthetic/zellij")
+    monkeypatch.setattr(
+        zellij_mod.subprocess, "run", lambda *args, **kwargs: _Completed(returncode, "synthetic-session\n")
+    )
+    assert cli_mod.main(["session", operation, "synthetic-session"]) == returncode
+    output = capsys.readouterr()
+    if returncode:
+        assert "Failed to" in output.err
+    elif operation == "status":
+        assert output.out == "running\n"

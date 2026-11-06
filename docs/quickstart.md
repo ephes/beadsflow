@@ -245,6 +245,14 @@ uv run beadsflow session status beadsflow-<epic-id>
 
 If zellij is not installed, `beadsflow session ...` prints an equivalent manual `uv run beadsflow run ...` command.
 
+Noninteractive `session status` and `session stop` commands each give Zellij 10
+seconds to complete. A timeout or process startup failure returns exit code 1
+with an operation diagnostic, without echoing captured subprocess output.
+Python kills and waits for the direct timed-out process; this does not guarantee
+cleanup of independently spawned descendants. A stop timeout can be ambiguous;
+check session status before retrying. Interactive `session start` and `session attach`
+retain their normal interactive lifetimes, with no short control timeout.
+
 Epic locks refuse symlinked components in the two directory levels above the lock file (`.beads/locks` for epic runs) and nonregular lock files before writing PID metadata. Contention and acquisition/PID-write failures close the handle and release any acquired lock, allowing a later retry.
 
 Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
