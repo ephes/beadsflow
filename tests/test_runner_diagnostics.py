@@ -74,7 +74,9 @@ def test_runner_writes_log_and_includes_path_in_comment(tmp_path: Path) -> None:
     _issue_id, comment = fake_beads.comments[-1]
     assert "implementer command failed (exit 2)." in comment
     assert "Log:" in comment
-    assert "Output:" in comment
+    assert "Output:" not in comment
+    assert "boom" not in comment
+    assert "hello" not in comment
 
     logs_dir = beads_dir / "logs" / "beadsflow"
     log_files = list(logs_dir.glob("issue-1.implementer.*.log"))
@@ -336,9 +338,11 @@ def diagnostic_loop(tmp_path: Path) -> EpicRunLoop:
 
 
 def test_output_overflow_cannot_post_approval(tmp_path: Path) -> None:
+    import subprocess
     import sys
     from dataclasses import replace
 
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
     beads = _FakeBeadsWithIssues(comments={})
     loop = replace(diagnostic_loop(tmp_path), beads=beads)  # type: ignore[arg-type]
     profile = Profile(
@@ -482,7 +486,8 @@ def test_log_failure_preserves_profile_failure(
     assert len(loop.beads.comments) == 1  # type: ignore[attr-defined]
     comment = loop.beads.comments[0][1]  # type: ignore[attr-defined]
     assert f"command failed (exit {code})" in comment
-    assert "output exceeded" in comment if overflow else "failed" in comment
+    assert "Output:" not in comment
+    assert "output exceeded" not in comment
     assert "Log:" not in comment
     assert "Cannot write diagnostic log" in caplog.text
     assert list(outside.iterdir()) == []

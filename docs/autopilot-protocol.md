@@ -123,3 +123,24 @@ bd --no-daemon comment $issue LGTM
 # or:
 bd --no-daemon comment $issue $changes
 ```
+
+## Runner review and failure boundaries
+
+Runner review profiles require an available Git worktree and are fenced by the
+existing Git signature before and after execution. Non-Git Beads projects stop
+before reviewer launch. The configured Beads metadata subdirectory is excluded,
+including tracked JSONL exports written by command-mode comments; the rest of the
+entire worktree is covered, including outside a nested project root. Changed HEAD, tracked/staged patches or untracked content/modes stop
+publication and phase acceptance without undoing edits or closing the issue. A
+safe refusal comment is attempted and a private log preserves the reason and rejected output.
+Ignored files are outside the signature, as are edits made after the final check
+and transient changes restored before it. Prefer stdout mode so approval is
+published by the runner after the check; command-mode profiles own their direct
+Beads side effects and must be inspected before retrying a rejected review.
+
+Automatic runner failures (including invalid or truncated verdicts) post only a
+trusted phase/exit or verdict-validation error and private log reference. Raw process output stays in
+the protected local log, not failure comments or default console errors. A failed
+comment attempt preserves the primary failure. Valid stdout comments are still
+published as configured. The standalone review helper's output is not itself a
+runner execution fence.

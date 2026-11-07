@@ -189,7 +189,15 @@ class EpicRunLoop:
             kind="reviewer",
             profiles=self.settings.reviewers,
         )
+        before_sig = self._git_signature(exclude_beads=True)
         result = self._run_profile_command(profile=reviewer, issue_id=issue_id, phase="reviewer")
+        if self._git_signature(exclude_beads=True) != before_sig:
+            log_path = self._try_write_command_log(issue_id=issue_id, phase="reviewer", result=result)
+            failure = "Changes requested: Worktree changed during review; refusing review result"
+            if log_path is not None:
+                failure += f"\n\nLog:\n{log_path}"
+            self._post_failure_comment(issue_id=issue_id, failure=failure)
+            raise CommandError(failure)
         self._maybe_comment_from_stdout(
             profile=reviewer,
             issue_id=issue_id,
@@ -241,17 +249,9 @@ class EpicRunLoop:
         result = self._exec(argv=argv, issue_id=issue_id)
         if result.returncode == 0:
             return result
-        log_path = None
-        try:
-            log_path = self._write_command_log(issue_id=issue_id, phase=phase, result=result)
-        except CommandError as exc:
-            self.logger.error(str(exc))
+        log_path = self._try_write_command_log(issue_id=issue_id, phase=phase, result=result)
         failure = self._format_failure(phase, result, log_path=log_path)
-        self.logger.error(failure)
-        try:
-            self.beads.comment(issue_id, failure)
-        except Exception as exc:  # noqa: BLE001
-            self.logger.error(f"Failed to post failure comment to Beads: {exc}")
+        self._post_failure_comment(issue_id=issue_id, failure=failure)
         phase_label = phase.capitalize()
         log_detail = f" (log: {log_path})" if log_path is not None else ""
         raise CommandError(f"{phase_label} failed with code {result.returncode}{log_detail}")
@@ -294,12 +294,12 @@ class EpicRunLoop:
                 phase=phase,
             )
         except CommandError as exc:
-            self.logger.error(str(exc))
-            try:
-                self.beads.comment(issue_id, str(exc))
-            except Exception as comment_exc:  # noqa: BLE001
-                self.logger.error(f"Failed to post comment to Beads: {comment_exc}")
-            raise
+            log_path = self._try_write_command_log(issue_id=issue_id, phase=phase, result=result)
+            failure = str(exc)
+            if log_path is not None:
+                failure += f"\n\nLog:\n{log_path}"
+            self._post_failure_comment(issue_id=issue_id, failure=failure)
+            raise CommandError(failure) from exc
 
     def _ensure_phase(
         self,
@@ -315,19 +315,31 @@ class EpicRunLoop:
         self.beads.comment(issue_id, failure_comment)
         raise CommandError(error_message)
 
-    def _git_signature(self) -> str:
+    def _git_signature(self, *, exclude_beads: bool = False) -> str:
         if shutil.which("git") is None:
-            raise CommandError("require_git_changes is enabled but git is not available")
-        status = self._git_capture(["git", "status", "--porcelain=v1", "-uall"], allow_exit={0})
-        diff = self._git_capture(["git", "diff", "--binary"], allow_exit={0, 1})
-        staged = self._git_capture(["git", "diff", "--binary", "--cached"], allow_exit={0, 1})
+            raise CommandError("Git signature requires git but git is not available")
+        scope: list[str] = []
+        if exclude_beads:
+            try:
+                beads_dir = self.repo_paths.beads_dir.resolve()
+                relative = beads_dir.relative_to(self.repo_paths.worktree_root.resolve()).as_posix()
+            except ValueError:
+                pass  # External Beads databases are already outside the signature.
+            else:
+                if relative != ".":
+                    scope = ["--", ".", f":(top,literal,exclude){relative}"]
+        status = self._git_capture(["git", "status", "--porcelain=v1", "-uall", *scope], allow_exit={0})
+        diff = self._git_capture(["git", "diff", "--binary", *scope], allow_exit={0, 1})
+        staged = self._git_capture(["git", "diff", "--binary", "--cached", *scope], allow_exit={0, 1})
         head = self._git_capture(["git", "rev-parse", "--verify", "--quiet", "HEAD"], allow_exit={0, 1})
-        untracked = self._git_capture(["git", "ls-files", "--others", "--exclude-standard", "-z"], allow_exit={0})
+        untracked = self._git_capture(
+            ["git", "ls-files", "--others", "--exclude-standard", "-z", *scope], allow_exit={0}
+        )
         digest = hashlib.sha256()
         digest.update(head.encode("utf-8", errors="surrogateescape"))
         for relative in sorted(filter(None, untracked.split("\0"))):
             digest.update(b"\0" + os.fsencode(relative) + b"\0")
-            digest.update(untracked_signature(self.repo_paths.repo_root, relative))
+            digest.update(untracked_signature(self.repo_paths.worktree_root, relative))
         digest.update(b"\0")
         digest.update(diff.encode("utf-8", errors="surrogateescape"))
         digest.update(b"\0")
@@ -335,7 +347,7 @@ class EpicRunLoop:
         return f"{status}\n# diff-sha256={digest.hexdigest()}\n"
 
     def _git_capture(self, argv: list[str], *, allow_exit: set[int]) -> str:
-        return capture_git(argv[1:], cwd=self.repo_paths.repo_root, allow_exit=allow_exit)
+        return capture_git(argv[1:], cwd=self.repo_paths.worktree_root, allow_exit=allow_exit)
 
     def _comment_from_stdout(
         self,
@@ -348,11 +360,8 @@ class EpicRunLoop:
         phase: str,
     ) -> None:
         body = result.stdout or ""
-        excerpt = body.strip()
-        if not excerpt:
+        if not body.strip():
             raise CommandError(f"{phase} produced no stdout to post as a comment")
-        if len(excerpt) > 1000:
-            excerpt = excerpt[:1000] + "…"
         original_marker = marker_from_text(f"{prefix}{body}{suffix}")
         body = _cap_comment_body(body=body, prefix=prefix, suffix=suffix)
         comment_text = f"{prefix}{body}{suffix}"
@@ -360,21 +369,28 @@ class EpicRunLoop:
         if marker is not original_marker:
             raise CommandError(f"{phase} comment truncation changed verdict")
         if marker not in expected_markers:
-            raise CommandError(f"{phase} output missing expected marker.\n\nOutput:\n{excerpt}")
+            raise CommandError(f"{phase} output missing expected marker.")
         self.beads.comment(issue_id, comment_text)
 
     def _format_failure(self, phase: str, result: CommandResult, *, log_path: Path | None = None) -> str:
-        stderr = (result.stderr or "").strip()
-        stdout = (result.stdout or "").strip()
-        excerpt = stderr or stdout
-        if len(excerpt) > 1000:
-            excerpt = excerpt[:1000] + "…"
         message = f"{phase} command failed (exit {result.returncode})."
         if log_path is not None:
             message += f"\n\nLog:\n{log_path}"
-        if excerpt:
-            message += f"\n\nOutput:\n{excerpt}"
         return message
+
+    def _post_failure_comment(self, *, issue_id: str, failure: str) -> None:
+        self.logger.error(failure)
+        try:
+            self.beads.comment(issue_id, failure)
+        except Exception as exc:  # noqa: BLE001
+            self.logger.error(f"Failed to post failure comment to Beads ({type(exc).__name__})")
+
+    def _try_write_command_log(self, *, issue_id: str, phase: str, result: CommandResult) -> Path | None:
+        try:
+            return self._write_command_log(issue_id=issue_id, phase=phase, result=result)
+        except CommandError as exc:
+            self.logger.error(str(exc))
+            return None
 
     def _write_command_log(self, *, issue_id: str, phase: str, result: CommandResult) -> Path:
         stdout = result.stdout or ""

@@ -240,6 +240,7 @@ Recommended data flow (v0.1):
 Coordination is done via Beads comments on the child bead:
 
 - Implementer signals completion with a comment that starts with `Ready for review:`.
+- Runner review results are accepted/published only if the pre/post Git signature (excluding a configured Beads metadata subdirectory) is unchanged; reviewers require an available Git worktree, including for Beads-only projects that previously ran without Git; edits are preserved on refusal. This fences execution, not arbitrary later edits. Prefer stdout publication; command-mode profiles own direct Beads side effects.
 - Reviewer responds with either:
   - `LGTM`, or
   - `Changes requested:` followed by actionable notes.
@@ -260,7 +261,7 @@ When a bead is selected, the next phase is determined by the most recent coordin
 
 If the implementer or reviewer command fails (non-zero exit, timeout, or other execution error):
 
-- Post a comment on the child bead summarizing the failure (phase, exit code, and a short excerpt of stderr/stdout if available).
+- Post a comment on the child bead with trusted phase/exit or verdict-validation error and a private local log reference when available. Raw process output and invalid-verdict excerpts remain in protected logs, never automatic failure comments/default console errors. Comment-posting failures do not replace the primary outcome.
 - Default behavior is to stop the run and exit non-zero (`on_command_failure = "stop"`).
 - No automatic retries in v0.1 (retries/backoff can be added later once the basic behavior is stable).
 

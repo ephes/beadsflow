@@ -8,6 +8,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Refuse runner review results when the Git signature changes during review, before publishing stdout or accepting a verdict; retain changed files and log the refusal privately. Reviews now require an available Git worktree; non-Git Beads projects fail before reviewer launch. Ignore the configured Beads metadata subdirectory during review signatures so tracked JSONL comment exports remain usable; implementer change signatures still include it.
+- Keep automatic profile-failure and invalid-verdict comments/errors free of raw stdout/stderr; preserve details in private local logs and report trusted phase/exit or verdict-validation messages and log references. Comment-posting failures preserve the primary outcome without echoing exception details.
+
 - Bound command stdout/stderr capture to a combined 8 MiB (64 MiB for Git context/signatures), stop owned process groups on overflow, and reject truncated profile approvals (exit 125).
 - Create unique exclusive mode-0600 failure logs in an owned mode-0700 directory; refuse redirected directories, preserve earlier logs, and omit profile arguments from progress messages. Preserve profile failure reporting when a log cannot be written. Existing log files require manual retention/permission review.
 
