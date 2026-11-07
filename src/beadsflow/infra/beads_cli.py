@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shlex
 import time
 from dataclasses import dataclass
@@ -22,8 +23,9 @@ def _text(value: object) -> str:
 
 def _identity(value: object) -> str:
     value = _text(value)
-    if not value.strip():
-        raise ValueError("expected nonempty identity")
+    # Match the epic-lock policy before backend IDs reach argv or profiles.
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value) is None:
+        raise ValueError("expected canonical identity")
     return value
 
 

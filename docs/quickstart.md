@@ -115,7 +115,11 @@ The standalone helper limits its reviewer command to 3600 seconds by default, ma
 
 - `command` is **not** run via an implicit shell; it is parsed with `shlex.split(...)` into argv and executed directly.
 - If you want shell features (pipes, heredocs, `set -euo pipefail`, etc.), wrap your command explicitly: `bash -lc '...'`.
-- `{epic_id}` and `{issue_id}` in the configured argv are substituted per run.
+- `{epic_id}` and `{issue_id}` in the configured argv are substituted per run,
+  after argv parsing. Direct-argv placeholders remain single arguments; substitution
+  does not escape shell source. Never embed placeholders in a `bash -lc` program
+  (including inside quotes). Use quoted `"$BEADSFLOW_ISSUE_ID"` and
+  `"$BEADSFLOW_EPIC_ID"` expansions inside shell programs so identities remain data.
 - The following env vars are always provided to implementer/reviewer commands:
   - `BEADSFLOW_EPIC_ID`, `BEADSFLOW_ISSUE_ID`
   - `BEADS_DIR`, `BEADS_NO_DAEMON=1`
@@ -130,8 +134,8 @@ reviewer = "codex"
 
 [implementers.codex]
 command = """bash -lc 'set -euo pipefail
-issue="{issue_id}"
-epic="{epic_id}"
+issue="$BEADSFLOW_ISSUE_ID"
+epic="$BEADSFLOW_EPIC_ID"
 msgfile="$(mktemp -t beadsflow-codex-msg.XXXXXX)"
 trap "rm -f \\"$msgfile\\"" EXIT
 
@@ -159,8 +163,8 @@ bd --no-daemon --no-db comment "$issue" "$comment_text"
 
 [reviewers.codex]
 command = """bash -lc 'set -euo pipefail
-issue="{issue_id}"
-epic="{epic_id}"
+issue="$BEADSFLOW_ISSUE_ID"
+epic="$BEADSFLOW_EPIC_ID"
 msgfile="$(mktemp -t beadsflow-codex-review.XXXXXX)"
 trap "rm -f \\"$msgfile\\"" EXIT
 
@@ -312,8 +316,12 @@ Internal `bd` operations (`show`, comment, close, and import-only recovery) have
 
 `bd show` must return exactly one issue object whose ID exactly matches the requested
 full canonical ID. Short/partial IDs are no longer accepted. A backend identity mismatch
-is a hard stop before profiles, comment or close; the diagnostic does not echo the returned ID. Consumed identities must be nonempty strings, and issue/child statuses and issue
-types must be supported enum values. Priority is a nonnegative JSON integer
+is a hard stop before profiles, comment or close; the diagnostic does not echo the returned ID. Canonical issue, dependency
+and child IDs must match the epic-lock policy: ASCII letters, digits, `.`, `_`
+and `-`, starting with a letter or digit. Option-like IDs, whitespace and control
+characters are refused before selection, profile execution or subsequent Beads
+operations use that context. Issue/child statuses and issue types must be supported
+enum values. Priority is a nonnegative JSON integer
 (omitted priority still means P0); comment IDs are nonnegative JSON integers.
 Timestamps must be parseable ISO 8601 values with a timezone, including `Z` or
 an explicit offset, so all issue/child/comment times can be compared safely.
