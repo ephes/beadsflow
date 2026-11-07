@@ -71,6 +71,8 @@ Each implementer/reviewer profile can customize how comments are posted:
 - `comment_mode` (default: `"command"`): `"command"` means your command posts Beads comments itself; `"stdout"` means beadsflow posts the command stdout as the Beads comment.
 - `comment_prefix` / `comment_suffix`: strings appended before/after stdout when `comment_mode = "stdout"`.
 - `require_git_changes` (default: `false`): for implementers, fail the run if the Git signature did not change. The signature includes HEAD, tracked/staged patches, and Git-reported untracked file bytes and modes. Committed changes and edits to already-untracked files count; ignored files do not. Symlinks contribute their link target text without reading the target. Git-reported directories (including nested repositories) and special files contribute type/mode metadata without reading their contents.
+- Runner review now requires Git on PATH and an initialized Git worktree; non-Git Beads-only projects stop before reviewer launch (discovery, dry runs and ungated implementation remain supported).
+- Runner reviewers must leave the Git signature unchanged during execution, regardless of `require_git_changes`. Before stdout publication or phase acceptance, beadsflow compares HEAD, tracked/staged diffs and untracked bytes/modes with their pre-review state. A changed tree stops the run without closing the issue or posting runner approval; edits are retained, the refused result is logged privately and a safe `Changes requested:` comment is attempted. A failed signature stops before launching the reviewer or accepting its result. Ignored files and the configured Beads metadata subdirectory are excluded from review signatures, including tracked JSONL comment exports. The rest of the entire Git worktree is fenced, even for a nested Beads project. Implementer change signatures still include Beads metadata. This is a during-review fence, not protection against arbitrary later edits, and transient changes restored before the final signature are not detected. Use `comment_mode = "stdout"` so the runner owns publication; command-mode profiles are responsible for comments they post themselves. Inspect any directly posted approval before retrying after a rejected review.
 - Stdout comments are truncated by default (800 bytes / 40 lines). Override with `BEADSFLOW_MAX_COMMENT_BYTES` and `BEADSFLOW_MAX_COMMENT_LINES` (set to `0` to disable).
 
 Example (stdout mode):
@@ -162,10 +164,11 @@ msgfile="$(mktemp -t beadsflow-codex-review.XXXXXX)"
 trap "rm -f \\"$msgfile\\"" EXIT
 
 codex --ask-for-approval never exec --sandbox workspace-write --output-last-message "$msgfile" \
-  "Review bead ${issue} under epic ${epic}. Review the repo state and changes. Respond with a Beads comment. The first non-empty line must be exactly LGTM or start with Changes requested:. Do not wrap that marker in markdown/backticks."
+  "Review bead ${issue} under epic ${epic}. Review the repo state and changes. Respond with a Beads comment. The first non-empty line must be exactly LGTM or start with Changes requested:. Do not wrap that marker in markdown/backticks." 1>&2
 
-bd --no-daemon comment "$issue" "$(cat "$msgfile")"
+cat "$msgfile"
 '"""
+comment_mode = "stdout"
 ```
 
 Environment overrides (optional):
@@ -280,7 +283,7 @@ manually when no longer needed. There is no automatic rotation or expiry. Previo
 created logs are not rewritten; inspect their permissions and contents when upgrading.
 If a log cannot be written safely, beadsflow still reports the original profile failure
 and posts its failure comment without a log path. Normal and dry-run progress messages omit profile arguments. Commands can still print
-sensitive output, and failure comments can contain excerpts: avoid echoing credentials.
+sensitive output. Automatic runner failure comments and default console errors contain only trusted phase/exit or verdict-validation diagnostics and a private log reference; they never include raw stdout/stderr excerpts. Invalid, empty or verdict-changing truncated stdout is likewise logged privately instead of copied into a failure comment. If a comment cannot be posted, only the exception type is logged and the primary failure remains the outcome. Read the referenced local log for details. This policy covers automatic profile-failure and invalid-verdict diagnostics; configured stdout comments with valid markers are intentional publication, and command-mode profiles control their own comments.
 
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to one second for output draining. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync failure triggers automatic import/retry; other failures stop immediately. `run.command_timeout_seconds` continues to apply only to profiles.
 
@@ -303,8 +306,8 @@ Git status, diff, HEAD and untracked-path commands used for review context and
 five commands per collection). Diff collection disables external diff and textconv
 helpers. A timeout, launch failure or unsuccessful Git command stops the operation
 with a command error; the review helper prints no comment and never launches its
-reviewer with failed context. Runner signature failures stop before launching an
-implementer or accepting its output. Git output is decoded without newline
+reviewer with failed context. Runner signature failures stop before launching a gated
+implementer or reviewer, or accepting their output. Git output is decoded without newline
 translation or loss of filename bytes for signatures. Review prompts replace
 invalid UTF-8 with replacement characters so non-UTF-8 text patches remain reviewable. Owned Git process groups
 use the same TERM/KILL cleanup as runner profiles, with up to one second of
