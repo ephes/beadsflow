@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -29,16 +28,22 @@ class Zellij:
 
     def start(self, *, session_name: str, argv: list[str]) -> None:
         self._ensure_available()
-        completed = subprocess.run(
-            [self.executable, "-s", session_name, "-c", "--", *argv],
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                [self.executable, "-s", session_name, "-c", "--", *argv],
+                check=False,
+            )
+        except OSError as exc:
+            raise ZellijError(kind="failed", message=f"Cannot execute zellij start ({type(exc).__name__})") from exc
         if completed.returncode != 0:
             raise ZellijError(kind="failed", message=f"Failed to start zellij session: {session_name}")
 
     def attach(self, *, session_name: str) -> None:
         self._ensure_available()
-        completed = subprocess.run([self.executable, "attach", session_name], check=False)
+        try:
+            completed = subprocess.run([self.executable, "attach", session_name], check=False)
+        except OSError as exc:
+            raise ZellijError(kind="failed", message=f"Cannot execute zellij attach ({type(exc).__name__})") from exc
         if completed.returncode != 0:
             raise ZellijError(kind="failed", message=f"Failed to attach to zellij session: {session_name}")
 
@@ -61,7 +66,7 @@ class Zellij:
         self._ensure_available()
         try:
             completed = subprocess.run(
-                [self.executable, "list-sessions"],
+                [self.executable, "list-sessions", "--no-formatting", "--short"],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -76,20 +81,14 @@ class Zellij:
                 kind="failed", message=f"Cannot execute zellij list-sessions ({type(exc).__name__})"
             ) from exc
         if completed.returncode != 0:
+            if (
+                completed.returncode == 1
+                and not completed.stdout
+                and completed.stderr.strip() == "No active zellij sessions found."
+            ):
+                return False
             raise ZellijError(kind="failed", message="Failed to list zellij sessions")
 
-        for line in completed.stdout.splitlines():
-            token = self._parse_session_name(line)
-            if token == session_name:
-                return True
-        return False
-
-    @staticmethod
-    def _parse_session_name(line: str) -> str | None:
-        stripped = line.strip()
-        if not stripped:
-            return None
-        match = re.match(r"^([\w.-]+)", stripped)
-        if match is None:
-            return None
-        return match.group(1)
+        # Short, unformatted output is one complete session name per line.
+        # Never infer identity from a prefix of Zellij's display records.
+        return session_name in completed.stdout.splitlines()
