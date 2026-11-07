@@ -8,6 +8,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Recheck Beads/log directory identities below the trusted parent before reporting a private diagnostic path; detected swaps retain private artifacts without publishing the affected path. Attempt each owned directory descriptor's close once even when another close reports an I/O error. Add deterministic swap and I/O-failure resource regressions.
+
 - Refuse runner review results when the Git signature changes during review, before publishing stdout or accepting a verdict; retain changed files and log the refusal privately. Reviews now require an available Git worktree; non-Git Beads projects fail before reviewer launch. Ignore the configured Beads metadata subdirectory during review signatures so tracked JSONL comment exports remain usable; implementer change signatures still include it.
 - Keep automatic profile-failure and invalid-verdict comments/errors free of raw stdout/stderr; preserve details in private local logs and report trusted phase/exit or verdict-validation messages and log references. Comment-posting failures preserve the primary outcome without echoing exception details.
 

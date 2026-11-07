@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 from beadsflow.application.errors import CommandError
@@ -24,15 +25,18 @@ def _write_private(*, beads_dir: Path, prefix: str, content: str) -> Path:
     # Resolve only the trusted prefix. Never follow Beads/log directory symlinks,
     # including a swap between checking the path and opening the file.
     beads_dir = beads_dir.absolute()
-    directory = os.open(beads_dir.parent.resolve(strict=True), os.O_RDONLY | os.O_DIRECTORY)
-    try:
+    with ExitStack() as descriptors:
+        directory = os.open(beads_dir.parent.resolve(strict=True), os.O_RDONLY | os.O_DIRECTORY)
+        descriptors.callback(os.close, directory)
+        chain: list[tuple[int, str, int]] = []
         for component in (beads_dir.name, "logs", "beadsflow"):
             try:
                 os.mkdir(component, mode=0o700, dir_fd=directory)
             except FileExistsError:
                 pass
             child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
-            os.close(directory)
+            descriptors.callback(os.close, child)
+            chain.append((directory, component, child))
             directory = child
         if os.fstat(directory).st_uid != os.getuid():
             raise OSError("Diagnostic directory is not owned by the current user")
@@ -47,6 +51,9 @@ def _write_private(*, beads_dir: Path, prefix: str, content: str) -> Path:
             raise
         with handle:
             handle.write(content)
+        # Do not report a lexical path that was redirected while we wrote through
+        # owned descriptors. This checks identity at completion, not a path lock.
+        for parent, component, child in chain:
+            if not os.path.samestat(os.stat(component, dir_fd=parent, follow_symlinks=False), os.fstat(child)):
+                raise OSError("Diagnostic directory changed during log creation")
         return beads_dir / "logs" / "beadsflow" / name
-    finally:
-        os.close(directory)
