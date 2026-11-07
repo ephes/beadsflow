@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -136,3 +138,51 @@ def test_beads_cli_recovery_failures_are_bounded(
     assert expected_operation in str(caught.value)
     assert "synthetic failure" in str(caught.value)
     assert len(str(caught.value)) < 1100
+
+
+@pytest.mark.parametrize("failure_at", ["epic", "child"])
+def test_dry_run_never_imports_out_of_sync_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, failure_at: str
+) -> None:
+    import beadsflow.infra.beads_cli as module
+    from beadsflow.entrypoints.cli import main
+    from beadsflow.infra.run_command import CommandResult
+
+    monkeypatch.chdir(tmp_path)
+    for key in list(os.environ):
+        if key.startswith("BEADSFLOW_"):
+            monkeypatch.delenv(key)
+    beads = tmp_path / ".beads"
+    beads.mkdir()
+    content = beads / "issues.jsonl"
+    content.write_text("synthetic database bytes")
+    calls: list[list[str]] = []
+
+    def run(*, argv: list[str], **kwargs: object) -> CommandResult:
+        calls.append(argv)
+        if "sync" in argv:
+            content.write_text("recovery mutated content")
+            return CommandResult(argv, 1, "", "synthetic recovery failure")
+        assert argv[2:4] == ["--json", "show"]
+        if argv[-1] == failure_at:
+            return CommandResult(argv, 1, "", "Database out of sync with JSONL")
+        payload = [
+            {
+                "id": "epic",
+                "title": "Synthetic",
+                "status": "open",
+                "issue_type": "epic",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "dependents": [
+                    {"id": "child", "title": "Child", "status": "open", "created_at": "2026-01-01T00:00:00Z"}
+                ],
+            }
+        ]
+        return CommandResult(argv, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(module, "run_command", run)
+    assert main(["run", "epic", "--once", "--dry-run"]) == 1
+    assert all(argv[2:4] == ["--json", "show"] for argv in calls)
+    assert content.read_text() == "synthetic database bytes"
+    assert "out of sync" in caplog.text and "import-only" in caplog.text

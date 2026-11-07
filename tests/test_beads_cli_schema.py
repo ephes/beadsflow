@@ -96,7 +96,7 @@ def test_malformed_show_is_bounded_domain_error(monkeypatch: pytest.MonkeyPatch,
 
 
 @pytest.mark.parametrize("where", ["epic", "child"])
-@pytest.mark.parametrize("bad_field", ["comments", "dependencies", "created_at", "id"])
+@pytest.mark.parametrize("bad_field", ["comments", "dependencies", "created_at", "id", "mismatched_id"])
 def test_run_cli_rejects_schema_before_mutation_or_profile(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture, where: str, bad_field: str
 ) -> None:
@@ -118,7 +118,10 @@ def test_run_cli_rejects_schema_before_mutation_or_profile(
             issue["issue_type"] = "task"
             issue["dependents"] = []
         if argv[-1] == ("epic-1" if where == "epic" else "child-1"):
-            issue[bad_field] = None
+            if bad_field == "mismatched_id":
+                issue["id"] = "private-sentinel-other-id"
+            else:
+                issue[bad_field] = None
         return CommandResult(argv, 0, json.dumps([issue]), "")
 
     def forbidden(*args: object, **kwargs: object) -> None:
@@ -130,6 +133,7 @@ def test_run_cli_rejects_schema_before_mutation_or_profile(
     assert len(calls) == (1 if where == "epic" else 2)
     assert "bd show" in caplog.text
     assert len(caplog.text) < 500
+    assert "private-sentinel" not in caplog.text
 
 
 def test_valid_defaults_and_offset_timestamps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,7 +146,8 @@ def test_valid_defaults_and_offset_timestamps(monkeypatch: pytest.MonkeyPatch) -
     assert parsed.dependencies[0].dependency_type == "blocks"
 
 
-def test_beads_resolves_short_id_to_canonical_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("requested", ["1", "other-epic", "epic-1"])
+def test_show_binds_requested_identity(monkeypatch: pytest.MonkeyPatch, requested: str) -> None:
     import beadsflow.infra.beads_cli as module
 
     calls: list[list[str]] = []
@@ -152,6 +157,10 @@ def test_beads_resolves_short_id_to_canonical_identity(monkeypatch: pytest.Monke
         return CommandResult(argv, 0, json.dumps([_issue()]), "")
 
     monkeypatch.setattr(module, "run_command", run)
-    issue = BeadsCli("synthetic").get_issue("1")
-    assert issue.id == "epic-1"
-    assert calls == [["bd", "--no-daemon", "--json", "show", "1"]]
+    if requested == "epic-1":
+        assert BeadsCli("synthetic").get_issue(requested).id == requested
+    else:
+        with pytest.raises(BeadsError, match="identity mismatch") as caught:
+            BeadsCli("synthetic").get_issue(requested)
+        assert len(str(caught.value)) < 300
+    assert calls == [["bd", "--no-daemon", "--json", "show", requested]]

@@ -69,3 +69,39 @@ def test_all_dependencies_gate_execution(
     ready = external_status is IssueStatus.CLOSED and internal_status is IssueStatus.CLOSED
     assert loop.run(once=True, dry_run=False, max_iterations=1) == (0 if ready else 2)
     assert commands == ([child.id] if ready else [])
+
+
+@pytest.mark.parametrize("current_status", list(IssueStatus))
+@pytest.mark.parametrize("resume", [True, False])
+def test_refreshed_child_status_gates_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, current_status: IssueStatus, resume: bool
+) -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    first = Issue("child-1", "First", current_status, 1, IssueType.TASK, now, now, [], [], [])
+    second = replace(first, id="child-2", status=IssueStatus.OPEN)
+    epic = replace(
+        first,
+        id="epic",
+        issue_type=IssueType.EPIC,
+        dependents=[IssueSummary(c.id, c.title, IssueStatus.OPEN, i, now) for i, c in enumerate((first, second))],
+    )
+
+    class FakeBeads:
+        def get_issue(self, issue_id: str) -> Issue:
+            return {epic.id: epic, first.id: first, second.id: second}[issue_id]
+
+    dispatched: list[str] = []
+    monkeypatch.setattr(EpicRunLoop, "_run_implementer", lambda self, *, issue_id: dispatched.append(issue_id))
+    defaults = Settings.defaults()
+    loop = EpicRunLoop(
+        beads=FakeBeads(),  # type: ignore[arg-type]
+        epic_id=epic.id,
+        settings=replace(defaults, run=replace(defaults.run, resume_in_progress=resume)),
+        repo_paths=RepoPaths(tmp_path, tmp_path / ".beads"),
+        implementer_name="fake",
+        reviewer_name=None,
+        logger=logging.getLogger("test.status"),
+    )
+    assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+    eligible = current_status is IssueStatus.OPEN or (resume and current_status is IssueStatus.IN_PROGRESS)
+    assert dispatched == [first.id if eligible else second.id]

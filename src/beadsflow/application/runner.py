@@ -12,7 +12,7 @@ from pathlib import Path
 from beadsflow.application.errors import CommandError, ConfigError
 from beadsflow.application.phase import Phase
 from beadsflow.application.select import determine_next_work, marker_from_text, select_next_child
-from beadsflow.domain.models import Issue, IssueStatus, IssueType, Marker
+from beadsflow.domain.models import Issue, IssueStatus, IssueType, Marker, comment_order_key
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.command_log import write_command_log
 from beadsflow.infra.git_command import capture_git
@@ -114,13 +114,22 @@ class EpicRunLoop:
             return 2
 
         next_work = determine_next_work(issue_id=selected.id, comments=selected.comments)
-        self.logger.info(f"Selected {selected.id} ({next_work.phase.value}).")
+        phase = next_work.phase
+        stale_approval = phase is Phase.CLOSE and not self._approval_matches(selected)
+        if stale_approval:
+            phase = Phase.REVIEW
+        self.logger.info(f"Selected {selected.id} ({phase.value}).")
 
         if dry_run:
-            self._log_dry_run(phase=next_work.phase, issue_id=selected.id)
+            self._log_dry_run(phase=phase, issue_id=selected.id)
             return 0
 
-        match next_work.phase:
+        if stale_approval:
+            self.beads.comment(
+                selected.id, "Ready for review: Approval evidence missing or stale; review current content."
+            )
+
+        match phase:
             case Phase.CLOSE:
                 self.beads.close(next_work.issue_id)
                 self.logger.info(f"Closed {next_work.issue_id}.")
@@ -155,6 +164,11 @@ class EpicRunLoop:
         return cache.get(selected.id) or self.beads.get_issue(selected.id)
 
     def _is_child_ready(self, child: Issue) -> bool:
+        eligible = {IssueStatus.OPEN}
+        if self.settings.run.resume_in_progress:
+            eligible.add(IssueStatus.IN_PROGRESS)
+        if child.status not in eligible:
+            return False
         for dep in child.dependencies:
             if dep.dependency_type == "blocks" and dep.status is not IssueStatus.CLOSED:
                 return False
@@ -205,12 +219,34 @@ class EpicRunLoop:
             expected_markers={Marker.LGTM, Marker.CHANGES_REQUESTED},
             phase="reviewer",
         )
-        self._ensure_phase(
+        refreshed = self._ensure_phase(
             issue_id=issue_id,
             expected={Phase.CLOSE, Phase.IMPLEMENT},
             failure_comment="Reviewer completed but did not comment `LGTM` or `Changes requested:`; stopping.",
             error_message="Reviewer did not produce expected marker",
         )
+        if determine_next_work(issue_id=issue_id, comments=refreshed.comments).phase is Phase.CLOSE:
+            if self._git_signature(exclude_beads=True) != before_sig:
+                self.beads.comment(
+                    issue_id, "Ready for review: Worktree changed while publishing review; review again."
+                )
+                raise CommandError("Worktree changed while publishing review")
+            self.beads.comment(issue_id, f"LGTM\n\n{self._review_evidence(before_sig)}")
+
+    @staticmethod
+    def _review_evidence(signature: str) -> str:
+        digest = hashlib.sha256(signature.encode("utf-8", errors="surrogateescape")).hexdigest()
+        return f"Beadsflow reviewed Git signature: {digest}"
+
+    def _approval_matches(self, issue: Issue) -> bool:
+        latest = max(
+            (comment for comment in issue.comments if marker_from_text(comment.text) is not None),
+            key=comment_order_key,
+            default=None,
+        )
+        if latest is None or not latest.text.splitlines()[-1].startswith("Beadsflow reviewed Git signature: "):
+            return False
+        return latest.text.splitlines()[-1] == self._review_evidence(self._git_signature(exclude_beads=True))
 
     def _exec(self, *, argv: list[str], issue_id: str) -> CommandResult:
         return run_command(
@@ -308,10 +344,10 @@ class EpicRunLoop:
         expected: set[Phase],
         failure_comment: str,
         error_message: str,
-    ) -> None:
-        _refreshed, phase = self._wait_for_phase(issue_id=issue_id, expected=expected)
+    ) -> Issue:
+        refreshed, phase = self._wait_for_phase(issue_id=issue_id, expected=expected)
         if phase in expected:
-            return
+            return refreshed
         self.beads.comment(issue_id, failure_comment)
         raise CommandError(error_message)
 
@@ -320,6 +356,8 @@ class EpicRunLoop:
             raise CommandError("Git signature requires git but git is not available")
         scope: list[str] = []
         if exclude_beads:
+            # A resumed process rewrites the PID; this is not reviewed content.
+            scope = ["--", ".", ":(top,literal,exclude).beadsflow/locks/execution.lock"]
             try:
                 beads_dir = self.repo_paths.beads_dir.resolve()
                 relative = beads_dir.relative_to(self.repo_paths.worktree_root.resolve()).as_posix()
@@ -327,7 +365,7 @@ class EpicRunLoop:
                 pass  # External Beads databases are already outside the signature.
             else:
                 if relative != ".":
-                    scope = ["--", ".", f":(top,literal,exclude){relative}"]
+                    scope.append(f":(top,literal,exclude){relative}")
         status = self._git_capture(["git", "status", "--porcelain=v1", "-uall", *scope], allow_exit={0})
         diff = self._git_capture(["git", "diff", "--binary", *scope], allow_exit={0, 1})
         staged = self._git_capture(["git", "diff", "--binary", "--cached", *scope], allow_exit={0, 1})

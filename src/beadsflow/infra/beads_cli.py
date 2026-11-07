@@ -64,6 +64,7 @@ class BeadsCli:
     beads_dir: str
     no_db: bool = False
     command_timeout_seconds: float = 30
+    auto_sync: bool = True
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.command_timeout_seconds) or self.command_timeout_seconds <= 0:
@@ -107,6 +108,11 @@ class BeadsCli:
         operation = "bd " + shlex.join(arg[:200] for arg in diagnostic_args[:count])
         completed = self._execute(argv, deadline=deadline, operation=operation)
         if completed.returncode != 0 and self._is_db_out_of_sync(completed.stderr):
+            if not self.auto_sync:
+                raise BeadsError(
+                    f"{operation}: database out of sync; dry-run will not import. "
+                    "Run bd sync --import-only explicitly before retrying."
+                )
             recovery_operation = f"bd sync --import-only (recovering {operation})"
             sync = self._execute(
                 self._argv("sync", "--import-only"),
@@ -132,7 +138,10 @@ class BeadsCli:
         try:
             if not isinstance(data, list) or len(data) != 1:
                 raise ValueError("expected one issue")
-            return self._parse_issue(_object(data[0]))
+            issue = self._parse_issue(_object(data[0]))
+            if issue.id != issue_id:
+                raise BeadsError(f"bd show identity mismatch for {issue_id[:200]}; use the full canonical issue ID")
+            return issue
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             # Never echo malformed field values or whole external payloads.
             raise BeadsError(f"Invalid bd show payload for {issue_id[:200]} ({type(exc).__name__})") from exc

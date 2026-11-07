@@ -9,16 +9,16 @@ Approval requires exactly `LGTM` on the first nonempty line (surrounding whitesp
 Use these exact markers as the first non-empty line of a comment:
 
 - `Ready for review:` — implementer signals “I’m done, please review”.
-- `LGTM` — reviewer approves; the bead is considered complete.
+- `LGTM` — reviewer approves; automatic closure also requires runner-recorded Git signature evidence.
 - `Changes requested:` — reviewer requests changes; implementer should take over again.
 
-Only children of the selected epic are candidates for execution. Every blocking dependency reported by Beads must be closed before a child can run, including dependencies outside the epic. Open, in-progress, or blocked external dependencies prevent both new and resumed work. Readiness checks `dependency_type = "blocks"`; parent-child and association edges do not block execution. For older payloads with a missing, empty, or null dependency type, the dependency is treated as blocking.
+Only children of the selected epic are candidates for execution. Each refreshed child must still be `open` (or `in_progress` when resumption is enabled); stale eligible statuses in the epic summary do not permit dispatch or close. Every blocking dependency reported by Beads must be closed before a child can run, including dependencies outside the epic. Open, in-progress, or blocked external dependencies prevent both new and resumed work. Readiness checks `dependency_type = "blocks"`; parent-child and association edges do not block execution. For older payloads with a missing, empty, or null dependency type, the dependency is treated as blocking.
 
 ## How beadsflow chooses the next phase
 
 For a given bead, `beadsflow` looks at the **most recent marker** in the comment history:
 
-- If the most recent marker is `LGTM`, the bead is complete and should be closed (or skipped if already closed).
+- If the most recent marker is `LGTM`, close only when that comment carries runner-recorded Git signature evidence matching the current tree (or skip if already closed). Missing, invalid or stale evidence, including legacy/manual approvals, requests review again. Dry runs only preview this review.
 - If the most recent marker is `Ready for review:` and there is no later `LGTM`, run the reviewer phase.
 - If the most recent marker is `Changes requested:` (or there are no markers), run the implementer phase.
 
@@ -28,7 +28,7 @@ selection or the helper's latest Ready for review / previous review context.
 This ordering is separate from the fail-closed marker grammar above.
 
 The Beads adapter validates consumed issue, dependency, child and comment fields
-before returning context to selection or review. Malformed data stops the run
+before returning context to selection or review. Requests must use full canonical IDs and each `bd show` response must match its request exactly. Malformed or mismatched data stops the run
 with a bounded `BeadsError` diagnostic before using that data for a comment,
 close or profile invocation. See the [quickstart](quickstart.md) for the input contract.
 
@@ -82,6 +82,11 @@ bd --no-daemon comment $issue $msg
 
 ### Reviewer
 
+The commands below show manual review comments. For automatic closure, configure a
+runner reviewer: after an unchanged successful review the runner appends an `LGTM`
+comment with a `Beadsflow reviewed Git signature:` digest. A manually posted `LGTM`
+without that evidence will request another review on the next run.
+
 **bash/zsh**
 ```bash
 export BEADS_NO_DAEMON=1
@@ -128,13 +133,20 @@ bd --no-daemon comment $issue $changes
 
 Runner review profiles require an available Git worktree and are fenced by the
 existing Git signature before and after execution. Non-Git Beads projects stop
-before reviewer launch. The configured Beads metadata subdirectory is excluded,
+before reviewer launch. The configured Beads metadata subdirectory and the runner execution lock
+(`.beadsflow/locks/execution.lock`) are excluded,
 including tracked JSONL exports written by command-mode comments; the rest of the
 entire worktree is covered, including outside a nested project root. Changed HEAD, tracked/staged patches or untracked content/modes stop
 publication and phase acceptance without undoing edits or closing the issue. A
 safe refusal comment is attempted and a private log preserves the reason and rejected output.
-Ignored files are outside the signature, as are edits made after the final check
-and transient changes restored before it. Prefer stdout mode so approval is
+Ignored files and transient changes restored before a signature check are outside
+this guarantee. After an unchanged approval, the runner appends its Git signature
+evidence as a new approval comment. This is a content freshness check, not
+authentication of the author: Beads writers can reproduce the digest. Immediately before automatic close, including
+resumed runs, it compares that evidence against the current signature. Changed
+HEAD, tracked/staged content or untracked bytes/modes require review again. The
+configured Beads metadata subdirectory stays excluded. External editors are not
+locked out, so edits after the final close check can still race with close. Prefer stdout mode so approval is
 published by the runner after the check; command-mode profiles own their direct
 Beads side effects and must be inspected before retrying a rejected review.
 
