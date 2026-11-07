@@ -29,6 +29,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Require `bd show` responses to match the requested full canonical issue ID; backend mismatches stop automation without exposing the returned ID. Short/partial request IDs now require the full ID.
+- Recheck refreshed child statuses against `open`/configured resumable `in_progress` before dispatch or close, continuing past stale epic summaries.
+- Keep dry-run reads free of automatic import recovery; out-of-sync databases require an explicit manual `bd sync --import-only`. Normal recovery and documented dry-run locks remain unchanged.
+- Persist reviewed Git signature evidence in a runner-recorded approval comment and revalidate it before automatic close, including resumed runs. Exclude the runner execution lock from review signatures so changing process IDs do not invalidate unchanged approvals. The digest checks content freshness, not authorship. Changed content, legacy/manual approvals or missing/invalid evidence request review again; dry runs only preview it.
+
 - Run profiles at the discovered repository root, with root-relative paths and absolute Beads environment values.
 - Exclude concurrent epic runs in one worktree with a stable execution lock acquired before the per-epic lock; separate worktrees retain independent execution ownership.
 

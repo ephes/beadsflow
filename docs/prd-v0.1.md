@@ -56,7 +56,7 @@ Note: the CLI flags are shell-agnostic; fish users run the same command.
 
 Required behavior (v0.1):
 
-- Validate `<epic-id>` exists and is an epic (or at minimum, “has children”).
+- Require full canonical IDs. Validate `<epic-id>` exists and is an epic; each `bd show` response must exactly match its requested identity or stop before automation.
 - Enforce “one epic per lock” (see Safety/locking).
 - Determine the next actionable child bead under the epic:
   - Prefer an `open` child bead that is not blocked by dependencies.
@@ -76,7 +76,7 @@ Core flags (v0.1):
 - `--beads-dir <path>`: Repo-local Beads directory; default: `.beads`.
 - `--once`: Do exactly one pick+run iteration and exit.
 - `--interval <seconds>`: Sleep between iterations when not `--once`.
-- `--dry-run`: Print what would run (selected child bead, commands) but do not execute implementer/reviewer commands or write to Beads.
+- `--dry-run`: Print what would run (selected child bead, commands) but do not execute implementer/reviewer commands, sync/import recovery or write Beads content. Out-of-sync reads stop with explicit manual import guidance; the documented lock-file writes remain intentional.
 - `--implementer <name>` / `--reviewer <name>`: Select configured profiles.
 - `--max-iterations <n>`: Safety cap for long-running loops.
 - `--verbose` / `--quiet`: Control logging verbosity (useful for debugging/CI).
@@ -94,7 +94,7 @@ When multiple child beads are ready, `beadsflow run` must choose deterministical
 Default selection strategy (`priority_then_oldest`):
 
 1. Consider only children under the epic that are `open` (and, if enabled, `in_progress`).
-2. Filter to “ready” children: every blocking dependency reported by Beads is closed, including dependencies outside the epic.
+2. Refresh each candidate and recheck that its current status is `open` (or configured resumable `in_progress`); skip candidates whose epic summary is stale. Every blocking dependency on that same refreshed issue must be closed, including dependencies outside the epic.
 3. Sort candidates by:
    1. Priority (P1 before P2 before P3 …)
    2. Creation time (oldest first)
@@ -240,7 +240,7 @@ Recommended data flow (v0.1):
 Coordination is done via Beads comments on the child bead:
 
 - Implementer signals completion with a comment that starts with `Ready for review:`.
-- Runner review results are accepted/published only if the pre/post Git signature (excluding a configured Beads metadata subdirectory) is unchanged; reviewers require an available Git worktree, including for Beads-only projects that previously ran without Git; edits are preserved on refusal. This fences execution, not arbitrary later edits. Prefer stdout publication; command-mode profiles own direct Beads side effects.
+- Runner review results are accepted/published only if the pre/post Git signature (excluding a configured Beads metadata subdirectory and `.beadsflow/locks/execution.lock`) is unchanged; reviewers require an available Git worktree, including for Beads-only projects that previously ran without Git; edits are preserved on refusal. Successful approval receives a runner-recorded `LGTM` comment carrying a digest of the reviewed Git signature. This checks content freshness and does not authenticate authorship; Beads writers can reproduce it. Recompare the current signature immediately before automatic close, including resumed runs; changed content or missing/invalid evidence requires review again. Prefer stdout publication; command-mode profiles own direct Beads side effects.
 - Reviewer responds with either:
   - `LGTM`, or
   - `Changes requested:` followed by actionable notes.
@@ -255,7 +255,7 @@ When a bead is selected, the next phase is determined by the most recent coordin
 
 - If the most recent marker is `Ready for review:` and there is no later `LGTM`, run the reviewer phase.
 - If the most recent marker is `Changes requested:` (or there are no markers), run the implementer phase.
-- If the most recent marker is `LGTM`, the bead is considered complete and should be closed (or skipped if already closed).
+- If the most recent marker is `LGTM`, close only when that comment carries runner-recorded Git signature evidence matching current content (or skip if already closed). Legacy/manual approvals without evidence and stale evidence cause a new `Ready for review:` request and reviewer phase. Dry runs only preview that review and publish no request.
 
 ### Failure handling (v0.1)
 

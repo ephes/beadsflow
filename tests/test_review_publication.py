@@ -114,7 +114,8 @@ def test_changed_review_cannot_publish_approval_or_close(review_loop: EpicRunLoo
 def test_unchanged_review_approves_and_closes(review_loop: EpicRunLoop, script: str) -> None:
     loop = with_script(review_loop, script)
     assert loop.run(once=False, dry_run=False, max_iterations=3) == 0
-    assert [c.text for c in loop.beads.comments] == ["Ready for review:", "LGTM\n"]  # type: ignore[attr-defined]
+    assert [c.text for c in loop.beads.comments[:2]] == ["Ready for review:", "LGTM\n"]  # type: ignore[attr-defined]
+    assert loop.beads.comments[-1].text.startswith("LGTM\n\nBeadsflow reviewed Git signature: ")  # type: ignore[attr-defined]
     assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
 
 
@@ -271,3 +272,103 @@ def test_beads_export_through_symlinked_ancestor_can_approve(review_loop: EpicRu
     )
     assert loop.run(once=False, dry_run=False, max_iterations=3) == 0
     assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("change", ["tracked", "staged", "untracked", "head", "unchanged"])
+def test_resumed_close_requires_reviewed_content(review_loop: EpicRunLoop, change: str) -> None:
+    loop = with_script(review_loop, "print('LGTM')")
+    assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+    root = loop.repo_paths.repo_root
+    if change != "unchanged":
+        (root / ("untracked" if change == "untracked" else "tracked")).write_text("after review")
+    if change in {"staged", "head"}:
+        git(root, "add", "tracked")
+    if change == "head":
+        git(root, "commit", "-m", "Synthetic later change")
+    # A fresh loop instance resumes from persisted comments, with no reviewer selected.
+    resumed = replace(loop, reviewer_name=None)
+    if change == "unchanged":
+        assert resumed.run(once=True, dry_run=False, max_iterations=1) == 0
+        assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
+        assert resumed.run(once=True, dry_run=False, max_iterations=1) == 0
+        assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
+    else:
+        from beadsflow.application.errors import ConfigError
+
+        with pytest.raises(ConfigError, match="No reviewer selected"):
+            resumed.run(once=True, dry_run=False, max_iterations=1)
+        assert loop.beads.closed == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_legacy_approval_requests_review(review_loop: EpicRunLoop, dry_run: bool) -> None:
+    loop = with_script(review_loop, "print('LGTM')")
+    loop.beads.comment("child", "LGTM")
+    if dry_run:
+        before = list(loop.beads.comments)  # type: ignore[attr-defined]
+        assert loop.run(once=True, dry_run=True, max_iterations=1) == 0
+        assert loop.beads.comments == before  # type: ignore[attr-defined]
+    else:
+        assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+        assert any(c.text.startswith("Ready for review:") for c in loop.beads.comments[2:])  # type: ignore[attr-defined]
+        assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+        assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
+    assert loop.beads.closed == ([] if dry_run else ["child"])  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("replacement", ["LGTM", "LGTM\n\nBeadsflow reviewed Git signature: broken"])
+def test_replaced_approval_needs_new_review(review_loop: EpicRunLoop, replacement: str) -> None:
+    from beadsflow.application.errors import ConfigError
+
+    loop = with_script(review_loop, "print('LGTM')")
+    assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+    loop.beads.comment("child", replacement)
+    with pytest.raises(ConfigError, match="No reviewer selected"):
+        replace(loop, reviewer_name=None).run(once=True, dry_run=False, max_iterations=1)
+    assert loop.beads.closed == []  # type: ignore[attr-defined]
+
+
+def test_change_during_approval_publication_cannot_get_evidence(
+    review_loop: EpicRunLoop, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = Beads.comment
+
+    def comment(self: Beads, issue_id: str, text: str) -> None:
+        original(self, issue_id, text)
+        if text.strip() == "LGTM":
+            (review_loop.repo_paths.repo_root / "tracked").write_text("changed during publication")
+
+    monkeypatch.setattr(Beads, "comment", comment)
+    loop = with_script(review_loop, "print('LGTM')")
+    with pytest.raises(CommandError, match="changed while publishing review"):
+        loop.run(once=True, dry_run=False, max_iterations=1)
+    assert not any("Beadsflow reviewed Git signature:" in c.text for c in loop.beads.comments)  # type: ignore[attr-defined]
+    assert loop.beads.closed == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("change", ["lock", "other"])
+def test_resumed_approval_excludes_only_execution_lock(review_loop: EpicRunLoop, change: str) -> None:
+    from beadsflow.application.errors import ConfigError
+
+    root = review_loop.repo_paths.repo_root
+    (root / ".gitignore").write_text(".beads/\nignored\n")
+    git(root, "add", ".gitignore")
+    git(root, "commit", "-m", "Keep execution metadata unignored")
+    lock = root / ".beadsflow" / "locks" / "execution.lock"
+    lock.parent.mkdir(parents=True)
+    lock.write_text("pid=111\n")
+    other = root / ".beadsflow" / "notes"
+    other.write_text("before")
+    loop = with_script(review_loop, "print('LGTM')")
+    assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+    lock.write_text("pid=222\n")  # A later process owns the same execution lock.
+    if change == "other":
+        other.write_text("after review")
+    resumed = replace(loop, reviewer_name=None)
+    if change == "lock":
+        assert resumed.run(once=True, dry_run=False, max_iterations=1) == 0
+        assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
+    else:
+        with pytest.raises(ConfigError, match="No reviewer selected"):
+            resumed.run(once=True, dry_run=False, max_iterations=1)
+        assert loop.beads.closed == []  # type: ignore[attr-defined]

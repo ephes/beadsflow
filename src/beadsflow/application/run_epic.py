@@ -74,7 +74,9 @@ def run_epic(request: RunEpicRequest) -> int:
         if not repo_paths.beads_dir.is_dir():
             raise ConfigError(f"Beads directory not found: {repo_paths.beads_dir}")
 
-        beads_cli = BeadsCli(beads_dir=str(repo_paths.beads_dir), no_db=settings.beads_no_db)
+        beads_cli = BeadsCli(
+            beads_dir=str(repo_paths.beads_dir), no_db=settings.beads_no_db, auto_sync=not request.dry_run
+        )
         lock_path = epic_lock_path(repo_paths.beads_dir, request.epic_id)
 
         # Fixed worktree location, independent of the selected Beads database/epic.
