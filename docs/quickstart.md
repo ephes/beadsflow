@@ -292,6 +292,18 @@ log directory symlinks are refused, and existing files are never overwritten. Lo
 argv and captured output, which may contain secrets: keep them private and delete them
 manually when no longer needed. There is no automatic rotation or expiry. Previously
 created logs are not rewritten; inspect their permissions and contents when upgrading.
+Beads/log directory opens refuse symlinks even when swapped in during creation.
+Writes stay on owned descriptors if an opened directory is renamed. The three
+components below the resolved, trusted parent (`.beads`, `logs`, `beadsflow` by
+default) are rechecked before reporting the log path. A detected rename or
+replacement of those components is an I/O failure, so the affected path is not
+published. The trusted ancestor prefix is resolved once and is not monitored for
+changes. This completion check cannot prevent path changes after it; it does not
+lock the directory namespace.
+On write, close or identity-check failure, an empty, partial or complete file may
+remain in the original owned directory, with mode 0600 under the mode-0700 log
+directory. No failed log path is published. Inspect and remove these artifacts
+manually, including in a renamed directory; retries create a new unique file.
 If a log cannot be written safely, beadsflow still reports the original profile failure
 and posts its failure comment without a log path. Normal and dry-run progress messages omit profile arguments. Commands can still print
 sensitive output. Automatic runner failure comments and default console errors contain only trusted phase/exit or verdict-validation diagnostics and a private log reference; they never include raw stdout/stderr excerpts. Invalid, empty or verdict-changing truncated stdout is likewise logged privately instead of copied into a failure comment. If a comment cannot be posted, only the exception type is logged and the primary failure remains the outcome. Read the referenced local log for details. This policy covers automatic profile-failure and invalid-verdict diagnostics; configured stdout comments with valid markers are intentional publication, and command-mode profiles control their own comments.
