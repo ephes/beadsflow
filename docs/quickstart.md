@@ -258,6 +258,16 @@ Python kills and waits for the direct timed-out process; this does not guarantee
 cleanup of independently spawned descendants. A stop timeout can be ambiguous;
 check session status before retrying. Interactive `session start` and `session attach`
 retain their normal interactive lifetimes, with no short control timeout.
+Launch failures for interactive commands also return exit code 1 with the operation
+and exception type, without exposing the exception payload. The terminal remains inherited.
+Status requires Zellij's `list-sessions --no-formatting --short` flags (verified with
+Zellij 0.45.1) and compares whole session names, including punctuation and Unicode.
+Display decorations and name prefixes are never used as session identities; an
+unsupported format flag is reported as a list failure.
+Zellij's exit-1 empty-list diagnostic maps to `not running`; other failures remain
+errors. Status means the exact name is listed, including exited sessions that Zellij
+can resurrect; the CLI's `running` label does not guarantee a live process.
+These output contracts are defined in [Zellij 0.45.1's session listing](https://github.com/zellij-org/zellij/blob/v0.45.1/zellij-utils/src/sessions.rs).
 
 Epic locks refuse symlinked components in the two directory levels above the lock file (`.beads/locks` for epic runs) and nonregular lock files before writing PID metadata. Contention and acquisition/PID-write failures close the handle and release any acquired lock, allowing a later retry.
 

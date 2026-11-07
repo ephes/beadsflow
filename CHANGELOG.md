@@ -29,6 +29,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Compare complete session names using Zellij's short, unformatted list output; avoid ANSI/display-prefix status errors. Normalize interactive start/attach launch failures to safe operation errors while preserving terminal inheritance and interactive lifetimes.
+
 - Require `bd show` responses to match the requested full canonical issue ID; backend mismatches stop automation without exposing the returned ID. Short/partial request IDs now require the full ID.
 - Recheck refreshed child statuses against `open`/configured resumable `in_progress` before dispatch or close, continuing past stale epic summaries.
 - Keep dry-run reads free of automatic import recovery; out-of-sync databases require an explicit manual `bd sync --import-only`. Normal recovery and documented dry-run locks remain unchanged.
