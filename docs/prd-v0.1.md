@@ -180,7 +180,7 @@ command_timeout_seconds = 3600
 
 Command templating (v0.1):
 
-- Commands are executed as shell-argv (no implicit shell); optionally support `{epic_id}` and `{issue_id}` substitutions.
+- Commands run at the discovered repository root, including nested-directory invocation. They are executed as shell-argv (no implicit shell); optionally support `{epic_id}` and `{issue_id}` substitutions.
 - `command_timeout_seconds` applies to implementer and reviewer command execution; on timeout, treat as a command failure (see Failure handling).
 - Environment passed to implementer/reviewer should include:
   - `BEADSFLOW_EPIC_ID`, `BEADSFLOW_ISSUE_ID`
@@ -195,9 +195,9 @@ Command templating (v0.1):
 
 ### Locking
 
-- Acquire an exclusive lock for the epic before any mutating operations.
+- Acquire the worktree execution lock at `<worktree_root>/.beadsflow/locks/execution.lock` first, then the epic lock, before any automation. The execution lock is independent of the configured Beads database or nested Beads project; it uses the nearest Git ancestor of the discovered project root, or that project root outside Git. Separate linked worktrees can run distinct epics; a shared database still excludes simultaneous runs of the same epic.
 - Lock location: `${BEADS_DIR}/locks/beadsflow-<epic-id>.lock` (directory created if missing).
-- Lock is held for the lifetime of the `beadsflow run` process (or at least during each iteration, but prefer process lifetime for clarity).
+- Both locks are held for the full run, including dry runs, and released on failure or interruption.
 - If lock acquisition fails, exit with a dedicated non-zero code and print which PID/host holds the lock when possible.
 
 ### “Safe defaults”

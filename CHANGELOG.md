@@ -26,6 +26,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Run profiles at the discovered repository root, with root-relative paths and absolute Beads environment values.
+- Exclude concurrent epic runs in one worktree with a stable execution lock acquired before the per-epic lock; separate worktrees retain independent execution ownership.
+
 - Order equal-timestamp comments by numeric ID consistently for phase selection and review context.
 - Validate consumed Beads issue schemas and identities at the adapter boundary; reject malformed fields, duplicate IDs and timezone-less timestamps with bounded domain errors before using that context.
 - Bound noninteractive Zellij status/stop calls to 10 seconds and report timeout/startup failures as operation errors; preserve interactive attach/start lifetimes.

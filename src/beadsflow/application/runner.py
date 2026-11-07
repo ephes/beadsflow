@@ -207,6 +207,7 @@ class EpicRunLoop:
     def _exec(self, *, argv: list[str], issue_id: str) -> CommandResult:
         return run_command(
             argv=argv,
+            cwd=self.repo_paths.repo_root,
             timeout_seconds=self.settings.run.command_timeout_seconds,
             env={
                 "BEADSFLOW_EPIC_ID": self.epic_id,
