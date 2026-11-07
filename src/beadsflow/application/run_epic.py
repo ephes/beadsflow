@@ -77,7 +77,10 @@ def run_epic(request: RunEpicRequest) -> int:
         beads_cli = BeadsCli(beads_dir=str(repo_paths.beads_dir), no_db=settings.beads_no_db)
         lock_path = epic_lock_path(repo_paths.beads_dir, request.epic_id)
 
-        with EpicLock(lock_path=lock_path):
+        # Fixed worktree location, independent of the selected Beads database/epic.
+        # Acquire worktree first, then epic; release both on every exit.
+        writer_lock = repo_paths.worktree_root / ".beadsflow" / "locks" / "execution.lock"
+        with EpicLock(lock_path=writer_lock), EpicLock(lock_path=lock_path):
             loop = EpicRunLoop(
                 beads=beads_cli,
                 epic_id=request.epic_id,

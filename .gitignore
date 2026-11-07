@@ -11,3 +11,4 @@ dist/
 build/
 *.egg-info/
 docs/_build/
+.beadsflow/

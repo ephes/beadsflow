@@ -12,11 +12,22 @@ class RepoPaths:
     @staticmethod
     def discover(*, cwd: Path, beads_dir: str | None) -> RepoPaths:
         beads_dir_name = beads_dir or ".beads"
-        current = cwd.resolve()
-        while True:
+        start = cwd.resolve()
+        ancestors = (start, *start.parents)
+        for current in ancestors:
             candidate = current / beads_dir_name
-            if candidate.is_dir():
+            if not Path(beads_dir_name).is_absolute() and candidate.is_dir():
                 return RepoPaths(repo_root=current, beads_dir=candidate)
-            if current.parent == current:
-                return RepoPaths(repo_root=cwd.resolve(), beads_dir=(cwd / beads_dir_name).resolve())
-            current = current.parent
+            # Absolute/shared databases cannot identify the current project.
+            # Keep ancestor Beads projects working, even inside a larger Git repo.
+            if (current / ".beads").is_dir() or (current / ".git").exists():
+                return RepoPaths(repo_root=current, beads_dir=candidate)
+        return RepoPaths(repo_root=start, beads_dir=(start / beads_dir_name))
+
+    @property
+    def worktree_root(self) -> Path:
+        # Beads projects may live below the Git root but still share tracked files.
+        for current in (self.repo_root, *self.repo_root.parents):
+            if (current / ".git").exists():
+                return current
+        return self.repo_root
