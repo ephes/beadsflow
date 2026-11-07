@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Pass identities through quoted environment expansions in the quickstart Bash profiles instead of interpolating placeholders into shell source.
+
+- Reject malformed canonical issue, dependency and child IDs before selection, profile execution or subsequent Beads operations; preserve short/partial lookup support.
+
 - Refuse runner review results when the Git signature changes during review, before publishing stdout or accepting a verdict; retain changed files and log the refusal privately. Reviews now require an available Git worktree; non-Git Beads projects fail before reviewer launch. Ignore the configured Beads metadata subdirectory during review signatures so tracked JSONL comment exports remain usable; implementer change signatures still include it.
 - Keep automatic profile-failure and invalid-verdict comments/errors free of raw stdout/stderr; preserve details in private local logs and report trusted phase/exit or verdict-validation messages and log references. Comment-posting failures preserve the primary outcome without echoing exception details.
 

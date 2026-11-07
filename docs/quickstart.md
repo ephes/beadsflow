@@ -114,7 +114,11 @@ The standalone helper limits its reviewer command to 3600 seconds by default, ma
 
 - `command` is **not** run via an implicit shell; it is parsed with `shlex.split(...)` into argv and executed directly.
 - If you want shell features (pipes, heredocs, `set -euo pipefail`, etc.), wrap your command explicitly: `bash -lc '...'`.
-- `{epic_id}` and `{issue_id}` in the configured argv are substituted per run.
+- `{epic_id}` and `{issue_id}` in the configured argv are substituted per run,
+  after argv parsing. Direct-argv placeholders remain single arguments; substitution
+  does not escape shell source. Never embed placeholders in a `bash -lc` program
+  (including inside quotes). Use quoted `"$BEADSFLOW_ISSUE_ID"` and
+  `"$BEADSFLOW_EPIC_ID"` expansions inside shell programs so identities remain data.
 - The following env vars are always provided to implementer/reviewer commands:
   - `BEADSFLOW_EPIC_ID`, `BEADSFLOW_ISSUE_ID`
   - `BEADS_DIR`, `BEADS_NO_DAEMON=1`
@@ -129,8 +133,8 @@ reviewer = "codex"
 
 [implementers.codex]
 command = """bash -lc 'set -euo pipefail
-issue="{issue_id}"
-epic="{epic_id}"
+issue="$BEADSFLOW_ISSUE_ID"
+epic="$BEADSFLOW_EPIC_ID"
 msgfile="$(mktemp -t beadsflow-codex-msg.XXXXXX)"
 trap "rm -f \\"$msgfile\\"" EXIT
 
@@ -158,8 +162,8 @@ bd --no-daemon --no-db comment "$issue" "$comment_text"
 
 [reviewers.codex]
 command = """bash -lc 'set -euo pipefail
-issue="{issue_id}"
-epic="{epic_id}"
+issue="$BEADSFLOW_ISSUE_ID"
+epic="$BEADSFLOW_EPIC_ID"
 msgfile="$(mktemp -t beadsflow-codex-review.XXXXXX)"
 trap "rm -f \\"$msgfile\\"" EXIT
 
@@ -288,8 +292,12 @@ sensitive output. Automatic runner failure comments and default console errors c
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to one second for output draining. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync failure triggers automatic import/retry; other failures stop immediately. `run.command_timeout_seconds` continues to apply only to profiles.
 
 `bd show` must return exactly one issue object. Beads resolves short/partial
-request IDs; its returned canonical identity is preserved. Consumed identities must be nonempty strings, and issue/child statuses and issue
-types must be supported enum values. Priority is a nonnegative JSON integer
+request IDs; its returned canonical identity is preserved. Canonical issue, dependency
+and child IDs must match the epic-lock policy: ASCII letters, digits, `.`, `_`
+and `-`, starting with a letter or digit. Option-like IDs, whitespace and control
+characters are refused before selection, profile execution or subsequent Beads
+operations use that context. Issue/child statuses and issue types must be supported
+enum values. Priority is a nonnegative JSON integer
 (omitted priority still means P0); comment IDs are nonnegative JSON integers.
 Timestamps must be parseable ISO 8601 values with a timezone, including `Z` or
 an explicit offset, so all issue/child/comment times can be compared safely.
