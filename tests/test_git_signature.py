@@ -198,3 +198,92 @@ def test_large_tracked_diff_keeps_signature_working(loop: EpicRunLoop) -> None:
     after = loop._git_signature()
     assert after != before
     assert loop._git_signature() == after
+
+
+@pytest.mark.parametrize("inventory", ["sparse", "aggregate"])
+def test_untracked_inventory_has_one_byte_budget(
+    loop: EpicRunLoop, monkeypatch: pytest.MonkeyPatch, inventory: str
+) -> None:
+    import beadsflow.infra.git_signature as signatures
+    from beadsflow.application.errors import CommandError
+
+    monkeypatch.setattr(signatures, "MAX_FINGERPRINT_BYTES", 128, raising=False)
+    root = loop.repo_paths.repo_root
+    if inventory == "sparse":
+        with (root / "oversized").open("wb") as handle:
+            handle.truncate(129)
+    else:
+        for i in range(3):
+            (root / str(i)).write_bytes(b"x" * 50)
+    with pytest.raises(CommandError, match="fingerprint.*byte budget"):
+        loop._git_signature()
+
+
+@pytest.mark.parametrize("inventory", ["single", "many"])
+def test_untracked_inventory_has_one_deadline(
+    loop: EpicRunLoop, monkeypatch: pytest.MonkeyPatch, inventory: str
+) -> None:
+    import beadsflow.infra.git_signature as signatures
+    from beadsflow.application.errors import CommandError
+
+    ticks = 0
+
+    def clock() -> float:
+        nonlocal ticks
+        ticks += 1
+        return float(ticks)
+
+    monkeypatch.setattr(signatures, "monotonic", clock, raising=False)
+    monkeypatch.setattr(signatures, "FINGERPRINT_TIMEOUT_SECONDS", 8, raising=False)
+    root = loop.repo_paths.repo_root
+    for i in range(1 if inventory == "single" else 10):
+        (root / str(i)).write_bytes(b"x" * (65536 * 10 if inventory == "single" else 1))
+    with pytest.raises(CommandError, match="fingerprint.*deadline"):
+        loop._git_signature()
+
+
+@pytest.mark.parametrize("mutation", ["grow", "shrink"])
+def test_untracked_read_is_bound_to_opened_size(
+    loop: EpicRunLoop, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    from collections.abc import Iterator
+    from contextlib import contextmanager
+    from typing import IO
+
+    import beadsflow.infra.git_signature as signatures
+    from beadsflow.application.errors import CommandError
+
+    path = loop.repo_paths.repo_root / "changing"
+    path.write_bytes(b"x" * (65536 * 2))
+    original_fdopen = os.fdopen
+    changes = 0
+    reads = 0
+
+    @contextmanager
+    def fdopen(fd: int, mode: str, *, buffering: int = -1) -> Iterator[IO[bytes]]:
+        nonlocal reads, changes
+        with original_fdopen(fd, mode, buffering=buffering) as handle:
+            original_read = handle.read
+
+            def read(size: int = -1) -> bytes:
+                nonlocal reads, changes
+                reads += 1
+                chunk: bytes = original_read(size)
+                # Finite even with the original read-to-EOF implementation.
+                if chunk and changes < 3:
+                    with path.open("ab" if mutation == "grow" else "wb") as writer:
+                        if mutation == "grow":
+                            writer.write(b"y" * 65536)
+                    changes += 1
+                return chunk
+
+            monkeypatch.setattr(handle, "read", read)
+            yield handle
+
+    monkeypatch.setattr(signatures.os, "fdopen", fdopen)
+    try:
+        with pytest.raises(CommandError, match="changed.*fingerprint"):
+            loop._git_signature()
+    finally:
+        assert changes > 0  # The injected file mutation really executed.
+    assert reads <= 2  # Never chase appended data beyond the opened size.

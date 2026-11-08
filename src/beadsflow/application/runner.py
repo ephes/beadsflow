@@ -16,7 +16,7 @@ from beadsflow.domain.models import Issue, IssueStatus, IssueType, Marker, comme
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.command_log import write_command_log
 from beadsflow.infra.git_command import capture_git
-from beadsflow.infra.git_signature import untracked_signature
+from beadsflow.infra.git_signature import FingerprintBudget, untracked_signature
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.infra.run_command import CommandResult, run_command
 from beadsflow.settings import Profile, Settings
@@ -375,9 +375,11 @@ class EpicRunLoop:
         )
         digest = hashlib.sha256()
         digest.update(head.encode("utf-8", errors="surrogateescape"))
+        budget = FingerprintBudget.start()
         for relative in sorted(filter(None, untracked.split("\0"))):
             digest.update(b"\0" + os.fsencode(relative) + b"\0")
-            digest.update(untracked_signature(self.repo_paths.worktree_root, relative))
+            digest.update(untracked_signature(self.repo_paths.worktree_root, relative, budget=budget))
+        budget.check()
         digest.update(b"\0")
         digest.update(diff.encode("utf-8", errors="surrogateescape"))
         digest.update(b"\0")

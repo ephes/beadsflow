@@ -372,3 +372,25 @@ def test_resumed_approval_excludes_only_execution_lock(review_loop: EpicRunLoop,
         with pytest.raises(ConfigError, match="No reviewer selected"):
             resumed.run(once=True, dry_run=False, max_iterations=1)
         assert loop.beads.closed == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("stage", ["before", "after", "resume"])
+def test_fingerprint_budget_failure_preserves_approval_state(
+    review_loop: EpicRunLoop, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    import beadsflow.infra.git_signature as signatures
+
+    root = review_loop.repo_paths.repo_root
+    loop = with_script(review_loop, "print('LGTM')")
+    if stage == "resume":
+        assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+    if stage == "after":
+        loop = with_script(loop, "from pathlib import Path; Path('large').write_bytes(b'x' * 256); print('LGTM')")
+    else:
+        (root / "large").write_bytes(b"x" * 256)
+    comments = list(loop.beads.comments)  # type: ignore[attr-defined]
+    monkeypatch.setattr(signatures, "MAX_FINGERPRINT_BYTES", 128, raising=False)
+    with pytest.raises(CommandError, match="fingerprint.*byte budget"):
+        loop.run(once=True, dry_run=False, max_iterations=1)
+    assert loop.beads.comments == comments  # type: ignore[attr-defined]
+    assert loop.beads.closed == []  # type: ignore[attr-defined]
