@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Bound each untracked fingerprint inventory to 64 MiB and a shared 30-second deadline; read only the opened snapshot size and refuse detected file changes. Incomplete evidence stops review/publication and approval revalidation without closing the issue or replacing approval state.
+
+- Apply the shared 8 MiB combined stdout/stderr cap and owned process-group cleanup to standalone reviewer commands; overflow fails without printing a review comment or accepting a partial `LGTM`.
+
 - Recheck Beads/log directory identities below the trusted parent before reporting a private diagnostic path; detected swaps retain private artifacts without publishing the affected path. Attempt each owned directory descriptor's close once even when another close reports an I/O error. Add deterministic swap and I/O-failure resource regressions.
 
 - Refuse runner review results when the Git signature changes during review, before publishing stdout or accepting a verdict; retain changed files and log the refusal privately. Reviews now require an available Git worktree; non-Git Beads projects fail before reviewer launch. Ignore the configured Beads metadata subdirectory during review signatures so tracked JSONL comment exports remain usable; implementer change signatures still include it.

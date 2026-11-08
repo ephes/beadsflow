@@ -109,7 +109,7 @@ comment_mode = "stdout"
 `--cli` is parsed with `shlex.split(...)`, so you can pass a full command (e.g., `--cli "claude --model opus"`).
 Use `--prompt-arg` to match the flag your CLI uses to receive the prompt (default: `-p`).
 
-The standalone helper limits its reviewer command to 3600 seconds by default, matching the runner default. Set `beadsflow review --timeout-seconds 120` to override (positive integer). Configure this explicitly alongside `run.command_timeout_seconds` when using a different runner deadline; allow the outer runner enough time for context collection and cleanup. A timeout exits nonzero, writes a diagnostic to stderr, and prints no review comment or approval, even if the command emitted partial output. Python terminates and waits for the direct reviewer process; independently spawned descendants are not guaranteed to be terminated.
+The standalone helper limits its reviewer command to 3600 seconds by default, matching the runner default. Set `beadsflow review --timeout-seconds 120` to override (positive integer). Configure this explicitly alongside `run.command_timeout_seconds` when using a different runner deadline; allow the outer runner enough time for context collection and cleanup. A timeout exits nonzero, writes a diagnostic to stderr, and prints no review comment or approval, even if the command emitted partial output. The shared command runner terminates the owned process group and waits for the direct reviewer process, using the TERM/KILL cleanup described below.
 
 ### Command execution semantics
 
@@ -273,9 +273,9 @@ Epic locks refuse symlinked components in the two directory levels above the loc
 
 Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
 
-Runner profile commands on macOS/Linux execute in an owned process group. On timeout or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. This applies to runner profiles, not the standalone `beadsflow review` helper.
+Runner profile commands on macOS/Linux execute in an owned process group. On timeout or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. This applies to runner profiles and the standalone `beadsflow review` helper.
 
-Runner profiles and internal Beads commands have a hard 8 MiB combined stdout/stderr
+Runner profiles, standalone reviewer commands and internal Beads commands have a hard 8 MiB combined stdout/stderr
 capture limit per command. Git context/signature commands have a separate 64 MiB cap
 to accommodate large tracked diffs. Dirty trees exceeding the Git cap stop runs/reviews
 with an explicit exit-125 error rather than using incomplete context. Both pipes are drained together;
@@ -283,7 +283,7 @@ retained bytes stay within that limit, including during TERM/KILL cleanup. Excee
 stops the owned process group and returns code 125 with an overflow diagnostic. The
 phase fails before interpreting stdout, so even a captured `LGTM` cannot approve work.
 Failure logs retain only the bounded capture plus the diagnostic, not the full output.
-The standalone `beadsflow review` helper's reviewer subprocess is separate from this cap.
+The standalone helper likewise exits nonzero and prints no review comment on overflow, even if `LGTM` appears before or after the cap.
 
 Failed profile diagnostics are stored as unique files under
 `<beads_dir>/logs/beadsflow/`, with a timestamp and random suffix in each filename. New files use mode 0600; the log directory is owned by the
@@ -337,6 +337,17 @@ invalid UTF-8 with replacement characters so non-UTF-8 text patches remain revie
 use the same TERM/KILL cleanup as runner profiles, with up to one second of
 additional output draining; descendants that deliberately leave the group are
 outside this guarantee. These budgets are separate from profile/reviewer timeouts.
+
+Each untracked signature inventory shares an additional 30-second monotonic deadline
+and 64 MiB cumulative byte allowance across all paths (regular file sizes plus
+symlink target bytes). Oversized files are refused before reading; reads stop at
+the opened file's snapshot size, and a detected size, timestamp or mode change
+fails the signature. Deadline checks run between entries, path components and
+read chunks; they do not interrupt a blocked filesystem syscall. Incomplete
+evidence raises a command error without publishing approval or closing an issue,
+including when revalidating a prior approval. No partial signature is accepted.
+These in-process limits are independent of each Git subprocess's budget.
+
 
 Child readiness uses the refreshed child status as well as its dependencies: only `open`
 (and `in_progress` when `run.resume_in_progress` is enabled) can run or close. Stale epic

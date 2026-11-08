@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import shlex
-import subprocess
 import textwrap
 from dataclasses import dataclass
 
@@ -12,6 +11,7 @@ from beadsflow.application.select import marker_from_comment, marker_from_text
 from beadsflow.domain.models import Comment, Issue, Marker, comment_order_key
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.git_command import capture_git
+from beadsflow.infra.run_command import DEFAULT_MAX_OUTPUT_BYTES, run_command
 
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 3600
 DEFAULT_DIFF_MAX_BYTES = 8000
@@ -168,15 +168,13 @@ def _run_reviewer_command(
     if timeout_seconds <= 0:
         raise CommandError("Review timeout must be a positive number of seconds")
     try:
-        completed = subprocess.run(
-            argv,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise CommandError(f"Reviewer command timed out after {timeout_seconds} seconds") from exc
+        completed = run_command(argv=argv, timeout_seconds=timeout_seconds, env={})
+    except OSError as exc:
+        raise CommandError(f"Cannot execute reviewer command ({type(exc).__name__})") from exc
+    if completed.returncode == 124:
+        raise CommandError(f"Reviewer command timed out after {timeout_seconds} seconds")
+    if completed.returncode == 125:
+        raise CommandError(f"Reviewer command failed (exit 125): output exceeded {DEFAULT_MAX_OUTPUT_BYTES} bytes")
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()
         stdout = (completed.stdout or "").strip()
