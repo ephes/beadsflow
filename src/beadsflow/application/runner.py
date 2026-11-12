@@ -16,7 +16,7 @@ from beadsflow.domain.models import Issue, IssueStatus, IssueType, Marker, comme
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.command_log import write_command_log
 from beadsflow.infra.git_command import capture_git
-from beadsflow.infra.git_signature import untracked_signature
+from beadsflow.infra.git_signature import FingerprintBudget, untracked_signature
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.infra.run_command import CommandResult, run_command
 from beadsflow.settings import Profile, Settings
@@ -300,7 +300,14 @@ class EpicRunLoop:
     def _ensure_git_changes(self, *, profile: Profile, issue_id: str, before_sig: str | None) -> None:
         if not profile.require_git_changes or before_sig is None:
             return
-        after_sig = self._git_signature()
+        try:
+            after_sig = self._git_signature()
+        except CommandError as exc:
+            # Path-bearing details stay in the local log; the bead gets a trusted message.
+            self.logger.error(str(exc))
+            failure = "Implementer change check could not collect Git evidence; stopping. See local logs."
+            self._post_failure_comment(issue_id=issue_id, failure=failure)
+            raise CommandError(failure) from exc
         if after_sig != before_sig:
             return
         self.beads.comment(
@@ -375,9 +382,11 @@ class EpicRunLoop:
         )
         digest = hashlib.sha256()
         digest.update(head.encode("utf-8", errors="surrogateescape"))
+        budget = FingerprintBudget.start()
         for relative in sorted(filter(None, untracked.split("\0"))):
             digest.update(b"\0" + os.fsencode(relative) + b"\0")
-            digest.update(untracked_signature(self.repo_paths.worktree_root, relative))
+            digest.update(untracked_signature(self.repo_paths.worktree_root, relative, budget=budget))
+        budget.check()
         digest.update(b"\0")
         digest.update(diff.encode("utf-8", errors="surrogateescape"))
         digest.update(b"\0")
