@@ -300,7 +300,14 @@ class EpicRunLoop:
     def _ensure_git_changes(self, *, profile: Profile, issue_id: str, before_sig: str | None) -> None:
         if not profile.require_git_changes or before_sig is None:
             return
-        after_sig = self._git_signature()
+        try:
+            after_sig = self._git_signature()
+        except CommandError as exc:
+            # Path-bearing details stay in the local log; the bead gets a trusted message.
+            self.logger.error(str(exc))
+            failure = "Implementer change check could not collect Git evidence; stopping. See local logs."
+            self._post_failure_comment(issue_id=issue_id, failure=failure)
+            raise CommandError(failure) from exc
         if after_sig != before_sig:
             return
         self.beads.comment(

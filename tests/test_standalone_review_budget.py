@@ -72,3 +72,17 @@ stop()
                     os.kill(pid, 9)
                 except ProcessLookupError:
                     pass
+
+
+@pytest.mark.parametrize("code", [124, 125])
+def test_reviewer_own_exit_code_is_not_reported_as_harness_limit(code: int) -> None:
+    script = f"import sys; sys.stderr.write('synthetic reviewer failure'); sys.exit({code})"
+    with pytest.raises(CommandError) as caught:
+        review._run_reviewer_command(
+            cli_command=shlex.join([sys.executable, "-c", script]), prompt_arg="-p", prompt="synthetic"
+        )
+    message = str(caught.value)
+    assert f"exit {code}" in message
+    assert "synthetic reviewer failure" in message
+    assert "timed out" not in message
+    assert "output exceeded" not in message

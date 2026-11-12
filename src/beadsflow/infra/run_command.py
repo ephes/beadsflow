@@ -9,6 +9,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from beadsflow.application.errors import ConfigError
 
@@ -46,6 +47,8 @@ class CommandResult:
     returncode: int
     stdout: str
     stderr: str
+    # Set only when run_command itself stopped the command; a child's own 124/125 exit leaves it None.
+    limit: Literal["timeout", "output"] | None = None
 
 
 def run_command(
@@ -77,23 +80,30 @@ def run_command(
     output = (bytearray(), bytearray())
     code: int
     notice = ""
+    limit: Literal["timeout", "output"] | None = None
     try:
         _drain(process, output, timeout_seconds, max_output_bytes)
         code = process.returncode
     except _OutputLimitExceeded:
         _stop_group(process, output, max_output_bytes)
         code = 125
+        limit = "output"
         notice = f"\nCommand output exceeded {max_output_bytes} bytes; capture truncated."
     except subprocess.TimeoutExpired:
         _stop_group(process, output, max_output_bytes)
         code = 124
+        limit = "timeout"
         if not output[1]:
             notice = f"Timed out after {timeout_seconds} seconds."
     except BaseException:
         _stop_group(process, output, max_output_bytes)
         raise
     return CommandResult(
-        argv=argv, returncode=code, stdout=decode(bytes(output[0])), stderr=decode(bytes(output[1])) + notice
+        argv=argv,
+        returncode=code,
+        stdout=decode(bytes(output[0])),
+        stderr=decode(bytes(output[1])) + notice,
+        limit=limit,
     )
 
 

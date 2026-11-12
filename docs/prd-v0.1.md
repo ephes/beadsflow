@@ -240,7 +240,7 @@ Recommended data flow (v0.1):
 Coordination is done via Beads comments on the child bead:
 
 - Implementer signals completion with a comment that starts with `Ready for review:`.
-- Untracked signature collection shares a 64 MiB cumulative byte budget and a 30-second monotonic deadline, with reads limited to each opened snapshot size. Detected file changes or exhausted budgets fail closed without accepting partial evidence or changing approval/close state.
+- Untracked signature collection shares a 64 MiB cumulative byte budget and a 30-second monotonic deadline, with reads limited to each opened snapshot size. Detected file changes or exhausted budgets fail closed without accepting partial evidence or changing approval/close state. The budget also applies to implementer `require_git_changes` checks; a post-implementer failure posts a fixed failure comment.
 - Runner review results are accepted/published only if the pre/post Git signature (excluding a configured Beads metadata subdirectory and `.beadsflow/locks/execution.lock`) is unchanged; reviewers require an available Git worktree, including for Beads-only projects that previously ran without Git; edits are preserved on refusal. Successful approval receives a runner-recorded `LGTM` comment carrying a digest of the reviewed Git signature. This checks content freshness and does not authenticate authorship; Beads writers can reproduce it. Recompare the current signature immediately before automatic close, including resumed runs; changed content or missing/invalid evidence requires review again. Prefer stdout publication; command-mode profiles own direct Beads side effects.
 - Reviewer responds with either:
   - `LGTM`, or

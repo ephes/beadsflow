@@ -353,7 +353,10 @@ the opened file's snapshot size, and a detected size, timestamp or mode change
 fails the signature. Deadline checks run between entries, path components and
 read chunks; they do not interrupt a blocked filesystem syscall. Incomplete
 evidence raises a command error without publishing approval or closing an issue,
-including when revalidating a prior approval. No partial signature is accepted.
+including when revalidating a prior approval. The same budget applies to the
+implementer `require_git_changes` check: large untracked trees can stop a run
+before the implementer starts, and a failure after the implementer ran posts a
+fixed failure comment (details stay in the local log). No partial signature is accepted.
 These in-process limits are independent of each Git subprocess's budget.
 
 

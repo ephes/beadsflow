@@ -10,8 +10,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 - Pass identities through quoted environment expansions in the quickstart Bash profiles instead of interpolating placeholders into shell source.
 - Reject malformed canonical issue, dependency and child IDs before selection, profile execution or subsequent Beads operations.
-- Bound each untracked fingerprint inventory to 64 MiB and a shared 30-second deadline; read only the opened snapshot size and refuse detected file changes. Incomplete evidence stops review/publication and approval revalidation without closing the issue or replacing approval state.
-- Apply the shared 8 MiB combined stdout/stderr cap and owned process-group cleanup to standalone reviewer commands; overflow fails without printing a review comment or accepting a partial `LGTM`.
+- Bound each untracked fingerprint inventory to 64 MiB and a shared 30-second deadline; read only the opened snapshot size and refuse detected file changes. Incomplete evidence stops review/publication and approval revalidation without closing the issue or replacing approval state. The same budget applies to implementer `require_git_changes` checks; a failure after the implementer ran posts a fixed failure comment instead of stopping silently.
+- Apply the shared 8 MiB combined stdout/stderr cap and owned process-group cleanup to standalone reviewer commands; overflow fails without printing a review comment or accepting a partial `LGTM`. A reviewer's own exit 124/125 is reported as an ordinary failure, not as a timeout or overflow.
 
 - Recheck Beads/log directory identities below the trusted parent before reporting a private diagnostic path; detected swaps retain private artifacts without publishing the affected path. Attempt each owned directory descriptor's close once even when another close reports an I/O error. Add deterministic swap and I/O-failure resource regressions.
 

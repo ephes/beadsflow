@@ -171,9 +171,9 @@ def _run_reviewer_command(
         completed = run_command(argv=argv, timeout_seconds=timeout_seconds, env={})
     except OSError as exc:
         raise CommandError(f"Cannot execute reviewer command ({type(exc).__name__})") from exc
-    if completed.returncode == 124:
+    if completed.limit == "timeout":
         raise CommandError(f"Reviewer command timed out after {timeout_seconds} seconds")
-    if completed.returncode == 125:
+    if completed.limit == "output":
         raise CommandError(f"Reviewer command failed (exit 125): output exceeded {DEFAULT_MAX_OUTPUT_BYTES} bytes")
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()

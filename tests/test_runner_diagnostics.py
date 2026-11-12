@@ -491,3 +491,60 @@ def test_log_failure_preserves_profile_failure(
     assert "Log:" not in comment
     assert "Cannot write diagnostic log" in caplog.text
     assert list(outside.iterdir()) == []
+
+
+def test_implementer_change_check_failure_posts_trusted_comment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    beads_dir = tmp_path / ".beads"
+    beads_dir.mkdir()
+    settings = Settings(
+        beads_dir=str(beads_dir),
+        beads_no_db=False,
+        interval_seconds=30,
+        log_level="info",
+        implementer="test",
+        reviewer=None,
+        implementers={
+            "test": Profile(
+                command=CommandSpec.from_string("python -c \"print('ok')\""),
+                comment_mode="command",
+                comment_prefix="",
+                comment_suffix="",
+                require_git_changes=True,
+            )
+        },
+        reviewers={},
+        run=RunSettings(
+            max_iterations=1,
+            resume_in_progress=True,
+            selection_strategy="priority_then_oldest",
+            on_command_failure="stop",
+            command_timeout_seconds=60,
+        ),
+    )
+    fake_beads = _FakeBeads(comments=[])
+    loop = EpicRunLoop(
+        beads=fake_beads,  # type: ignore[arg-type]
+        epic_id="epic-1",
+        settings=settings,
+        repo_paths=RepoPaths(repo_root=tmp_path, beads_dir=beads_dir),
+        implementer_name="test",
+        reviewer_name=None,
+        logger=__import__("logging").getLogger("test"),
+    )
+    signatures = iter(["before"])
+
+    def signature(self: EpicRunLoop, *, exclude_beads: bool = False) -> str:
+        try:
+            return next(signatures)
+        except StopIteration:
+            raise CommandError("Cannot fingerprint untracked path: secret-name.bin") from None
+
+    monkeypatch.setattr(EpicRunLoop, "_git_signature", signature)
+    with pytest.raises(CommandError, match="could not collect Git evidence"):
+        loop._run_implementer(issue_id="issue-1")  # noqa: SLF001
+    assert fake_beads.comments == [
+        ("issue-1", "Implementer change check could not collect Git evidence; stopping. See local logs.")
+    ]
+    assert "secret-name.bin" in caplog.text
