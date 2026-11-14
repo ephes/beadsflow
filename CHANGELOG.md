@@ -38,6 +38,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Bind v2 approval evidence to canonical issue requirements as well as Git content; re-read requirements during review publication and before close. Changes and legacy Git-only evidence require fresh review; comments and timestamps do not invalidate approval.
+
+- Refresh all summarized-closed children before declaring epic completion; reuse authoritative reads for reopened work and fail closed on child read errors. Empty epics remain complete.
+
 - Compare complete session names using Zellij's short, unformatted list output; avoid ANSI/display-prefix status errors. Normalize interactive start/attach launch failures to safe operation errors while preserving terminal inheritance and interactive lifetimes.
 
 - Require `bd show` responses to match the requested full canonical issue ID; backend mismatches stop automation without exposing the returned ID. Short/partial request IDs now require the full ID.

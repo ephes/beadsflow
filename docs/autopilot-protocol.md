@@ -9,7 +9,7 @@ Approval requires exactly `LGTM` on the first nonempty line (surrounding whitesp
 Use these exact markers as the first non-empty line of a comment:
 
 - `Ready for review:` — implementer signals “I’m done, please review”.
-- `LGTM` — reviewer approves; automatic closure also requires runner-recorded Git signature evidence.
+- `LGTM` — reviewer approves; automatic closure also requires runner-recorded Git and issue-requirements evidence.
 - `Changes requested:` — reviewer requests changes; implementer should take over again.
 
 Only children of the selected epic are candidates for execution. Each refreshed child must still be `open` (or `in_progress` when resumption is enabled); stale eligible statuses in the epic summary do not permit dispatch or close. Every blocking dependency reported by Beads must be closed before a child can run, including dependencies outside the epic. Open, in-progress, or blocked external dependencies prevent both new and resumed work. Readiness checks `dependency_type = "blocks"`; parent-child and association edges do not block execution. For older payloads with a missing, empty, or null dependency type, the dependency is treated as blocking.
@@ -18,7 +18,7 @@ Only children of the selected epic are candidates for execution. Each refreshed 
 
 For a given bead, `beadsflow` looks at the **most recent marker** in the comment history:
 
-- If the most recent marker is `LGTM`, close only when that comment carries runner-recorded Git signature evidence matching the current tree (or skip if already closed). Missing, invalid or stale evidence, including legacy/manual approvals, requests review again. Dry runs only preview this review.
+- If the most recent marker is `LGTM`, close only when that comment carries runner-recorded Git and issue-requirements evidence matching the current tree (or skip if already closed). Missing, invalid or stale evidence, including legacy/manual approvals, requests review again. Dry runs only preview this review.
 - If the most recent marker is `Ready for review:` and there is no later `LGTM`, run the reviewer phase.
 - If the most recent marker is `Changes requested:` (or there are no markers), run the implementer phase.
 
@@ -84,7 +84,7 @@ bd --no-daemon comment $issue $msg
 
 The commands below show manual review comments. For automatic closure, configure a
 runner reviewer: after an unchanged successful review the runner appends an `LGTM`
-comment with a `Beadsflow reviewed Git signature:` digest. A manually posted `LGTM`
+comment with a `Beadsflow reviewed content v2:` digest. A manually posted `LGTM`
 without that evidence will request another review on the next run.
 
 **bash/zsh**
@@ -140,10 +140,10 @@ entire worktree is covered, including outside a nested project root. Changed HEA
 publication and phase acceptance without undoing edits or closing the issue. A
 safe refusal comment is attempted and a private log preserves the reason and rejected output.
 Ignored files and transient changes restored before a signature check are outside
-this guarantee. After an unchanged approval, the runner appends its Git signature
+this guarantee. After an unchanged approval, the runner appends its combined Git and issue-requirements
 evidence as a new approval comment. This is a content freshness check, not
 authentication of the author: Beads writers can reproduce the digest. Immediately before automatic close, including
-resumed runs, it compares that evidence against the current signature. Changed
+resumed runs, it compares that evidence against the current Git signature and re-read issue requirements. Changed
 HEAD, tracked/staged content or untracked bytes/modes require review again. The
 configured Beads metadata subdirectory stays excluded. External editors are not
 locked out, so edits after the final close check can still race with close. Prefer stdout mode so approval is
@@ -156,3 +156,16 @@ the protected local log, not failure comments or default console errors. A faile
 comment attempt preserves the primary failure. Valid stdout comments are still
 published as configured. The standalone review helper's output is not itself a
 runner execution fence.
+
+### Issue requirements in review evidence
+
+The v2 approval digest binds the Git signature to the canonical issue ID, title,
+issue type, description, acceptance criteria and sorted dependency ID/type pairs.
+Dependency order/status, priority, timestamps and comments are excluded. The
+runner reads requirements before review, after review before stdout publication,
+and again before publishing evidence. Changed requirements refuse the result and
+request review again. It also re-reads requirements and the latest verdict after
+collecting Git evidence immediately before close. Read failures stop the run.
+Old Git-only approval evidence is stale and requires a fresh review. This remains
+a freshness check, not author authentication; edits restored between checks and
+external writes after the final check are outside this guarantee.

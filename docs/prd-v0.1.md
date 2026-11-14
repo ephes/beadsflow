@@ -104,7 +104,7 @@ This strategy should be configurable in the config file for v0.1 (see Config mod
 
 ### Epic completeness (v0.1)
 
-“Epic complete” is evaluated dynamically: on each iteration, re-enumerate the epic’s current children. The epic is complete when there are no children in a non-`closed` status at the time of the check.
+“Epic complete” is evaluated dynamically: on each iteration, re-enumerate the epic’s current children. Before declaring completion from all-closed summaries, refresh every listed child from `bd show`. A reopened child participates in selection using that same per-iteration read; read failures stop the run. The epic is complete only when all these authoritative children are closed. An empty epic is complete.
 
 ### `beadsflow session`
 
@@ -242,7 +242,7 @@ Coordination is done via Beads comments on the child bead:
 
 - Implementer signals completion with a comment that starts with `Ready for review:`.
 - Untracked signature collection shares a 64 MiB cumulative byte budget and a 30-second monotonic deadline, with reads limited to each opened snapshot size. Detected file changes or exhausted budgets fail closed without accepting partial evidence or changing approval/close state. The budget also applies to implementer `require_git_changes` checks; a post-implementer failure posts a fixed failure comment.
-- Runner review results are accepted/published only if the pre/post Git signature (excluding a configured Beads metadata subdirectory and `.beadsflow/locks/execution.lock`) is unchanged; reviewers require an available Git worktree, including for Beads-only projects that previously ran without Git; edits are preserved on refusal. Successful approval receives a runner-recorded `LGTM` comment carrying a digest of the reviewed Git signature. This checks content freshness and does not authenticate authorship; Beads writers can reproduce it. Recompare the current signature immediately before automatic close, including resumed runs; changed content or missing/invalid evidence requires review again. Prefer stdout publication; command-mode profiles own direct Beads side effects.
+- Runner review results are accepted/published only if the pre/post Git signature (excluding a configured Beads metadata subdirectory and `.beadsflow/locks/execution.lock`) is unchanged; reviewers require an available Git worktree, including for Beads-only projects that previously ran without Git; edits are preserved on refusal. Successful approval receives a runner-recorded `LGTM` comment carrying a digest of the reviewed Git signature and canonical issue requirements. This checks content freshness and does not authenticate authorship; Beads writers can reproduce it. Bind the digest to canonical issue ID/title/type/description/acceptance criteria and sorted dependency ID/type pairs, excluding comments, timestamps, priority and dependency status. Re-read requirements after review, before evidence publication and after Git collection immediately before close; refuse changed requirements and old Git-only evidence. Recompare the current signature immediately before automatic close, including resumed runs; changed content or missing/invalid evidence requires review again. Prefer stdout publication; command-mode profiles own direct Beads side effects.
 - Reviewer responds with either:
   - `LGTM`, or
   - `Changes requested:` followed by actionable notes.
@@ -257,7 +257,7 @@ When a bead is selected, the next phase is determined by the most recent coordin
 
 - If the most recent marker is `Ready for review:` and there is no later `LGTM`, run the reviewer phase.
 - If the most recent marker is `Changes requested:` (or there are no markers), run the implementer phase.
-- If the most recent marker is `LGTM`, close only when that comment carries runner-recorded Git signature evidence matching current content (or skip if already closed). Legacy/manual approvals without evidence and stale evidence cause a new `Ready for review:` request and reviewer phase. Dry runs only preview that review and publish no request.
+- If the most recent marker is `LGTM`, close only when that comment carries runner-recorded Git and issue-requirements evidence matching current content (or skip if already closed). Legacy/manual approvals without evidence and stale evidence cause a new `Ready for review:` request and reviewer phase. Dry runs only preview that review and publish no request.
 
 ### Failure handling (v0.1)
 

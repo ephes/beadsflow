@@ -15,7 +15,7 @@ from beadsflow.application.errors import CommandError
 from beadsflow.application.runner import EpicRunLoop
 from beadsflow.domain.models import Comment, Issue, IssueStatus, IssueSummary, IssueType
 from beadsflow.infra.paths import RepoPaths
-from beadsflow.infra.run_command import CommandSpec
+from beadsflow.infra.run_command import CommandResult, CommandSpec
 from beadsflow.settings import Profile, Settings
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -115,7 +115,7 @@ def test_unchanged_review_approves_and_closes(review_loop: EpicRunLoop, script: 
     loop = with_script(review_loop, script)
     assert loop.run(once=False, dry_run=False, max_iterations=3) == 0
     assert [c.text for c in loop.beads.comments[:2]] == ["Ready for review:", "LGTM\n"]  # type: ignore[attr-defined]
-    assert loop.beads.comments[-1].text.startswith("LGTM\n\nBeadsflow reviewed Git signature: ")  # type: ignore[attr-defined]
+    assert loop.beads.comments[-1].text.startswith("LGTM\n\nBeadsflow reviewed content v2: ")  # type: ignore[attr-defined]
     assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
 
 
@@ -394,3 +394,127 @@ def test_fingerprint_budget_failure_preserves_approval_state(
         loop.run(once=True, dry_run=False, max_iterations=1)
     assert loop.beads.comments == comments  # type: ignore[attr-defined]
     assert loop.beads.closed == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("stage", ["review", "publication", "resume", "close-check"])
+def test_changed_requirements_cannot_approve_or_close(
+    review_loop: EpicRunLoop,
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    from beadsflow.application.errors import ConfigError
+
+    original_issue = Beads.get_issue
+    criteria = "Original acceptance criteria"
+
+    def issue(self: Beads, issue_id: str) -> Issue:
+        return replace(original_issue(self, issue_id), acceptance_criteria=criteria)
+
+    def change() -> None:
+        nonlocal criteria
+        criteria = "Changed acceptance criteria"
+
+    monkeypatch.setattr(Beads, "get_issue", issue)
+    loop = with_script(review_loop, "print('LGTM')")
+    if stage == "review":
+        original_exec = EpicRunLoop._exec
+
+        def execute(self: EpicRunLoop, *, argv: list[str], issue_id: str) -> CommandResult:
+            result = original_exec(self, argv=argv, issue_id=issue_id)
+            change()
+            return result
+
+        monkeypatch.setattr(EpicRunLoop, "_exec", execute)
+    elif stage == "publication":
+        original_comment = Beads.comment
+
+        def comment(self: Beads, issue_id: str, text: str) -> None:
+            original_comment(self, issue_id, text)
+            if text.strip() == "LGTM":
+                change()
+
+        monkeypatch.setattr(Beads, "comment", comment)
+    else:
+        assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+        loop = replace(loop, reviewer_name=None)
+        if stage == "resume":
+            change()
+        else:
+            original_signature = EpicRunLoop._git_signature
+
+            def signature(self: EpicRunLoop, *, exclude_beads: bool = False) -> str:
+                result = original_signature(self, exclude_beads=exclude_beads)
+                change()  # Edited after selection, while collecting close evidence.
+                return result
+
+            monkeypatch.setattr(EpicRunLoop, "_git_signature", signature)
+
+    expected = ConfigError if stage in {"resume", "close-check"} else CommandError
+    with pytest.raises(expected):
+        loop.run(once=True, dry_run=False, max_iterations=1)
+    assert loop.beads.closed == []  # type: ignore[attr-defined]
+    evidence = [c for c in loop.beads.comments if "Beadsflow reviewed" in c.text]  # type: ignore[attr-defined]
+    assert len(evidence) == int(stage in {"resume", "close-check"})
+    assert loop.beads.comments[-1].text.startswith(("Ready for review:", "Changes requested:"))  # type: ignore[attr-defined]
+
+
+def test_incidental_issue_updates_do_not_invalidate_approval(
+    review_loop: EpicRunLoop,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import timedelta
+
+    loop = with_script(review_loop, "print('LGTM')")
+    assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+    original = Beads.get_issue
+
+    def issue(self: Beads, issue_id: str) -> Issue:
+        return replace(original(self, issue_id), updated_at=NOW + timedelta(days=1), priority=3)
+
+    monkeypatch.setattr(Beads, "get_issue", issue)
+    loop.beads.comment("child", "Unrelated synthetic discussion")
+    assert replace(loop, reviewer_name=None).run(once=True, dry_run=False, max_iterations=1) == 0
+    assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
+
+
+def test_old_git_only_evidence_is_stale(review_loop: EpicRunLoop) -> None:
+    import hashlib
+
+    from beadsflow.application.errors import ConfigError
+
+    signature = review_loop._git_signature(exclude_beads=True)
+    digest = hashlib.sha256(signature.encode("utf-8", errors="surrogateescape")).hexdigest()
+    review_loop.beads.comment("child", f"LGTM\n\nBeadsflow reviewed Git signature: {digest}")
+    with pytest.raises(ConfigError, match="No reviewer selected"):
+        replace(review_loop, reviewer_name=None).run(once=True, dry_run=False, max_iterations=1)
+    assert review_loop.beads.closed == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("field", ["id", "title", "issue_type", "description", "acceptance_criteria", "dependencies"])
+def test_requirements_digest_covers_review_context(review_loop: EpicRunLoop, field: str) -> None:
+    from beadsflow.domain.models import Dependency
+
+    issue = review_loop.beads.get_issue("child")
+    changed = {
+        "id": replace(issue, id="another-child"),
+        "title": replace(issue, title="Changed title"),
+        "issue_type": replace(issue, issue_type=IssueType.BUG),
+        "description": replace(issue, description="Changed description"),
+        "acceptance_criteria": replace(issue, acceptance_criteria="Changed acceptance criteria"),
+        "dependencies": replace(issue, dependencies=[Dependency("other", IssueStatus.OPEN)]),
+    }
+    assert issue.requirements_digest() != changed[field].requirements_digest()
+
+
+def test_requirements_digest_canonicalizes_dependency_order_and_ignores_status(review_loop: EpicRunLoop) -> None:
+    from beadsflow.domain.models import Dependency
+
+    issue = replace(
+        review_loop.beads.get_issue("child"),
+        dependencies=[Dependency("a", IssueStatus.OPEN), Dependency("b", IssueStatus.CLOSED, "related")],
+    )
+    changed = replace(
+        issue,
+        dependencies=[Dependency("b", IssueStatus.OPEN, "related"), Dependency("a", IssueStatus.CLOSED)],
+    )
+    assert issue.requirements_digest() == changed.requirements_digest()

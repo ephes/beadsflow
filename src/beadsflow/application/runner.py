@@ -6,7 +6,7 @@ import os
 import shutil
 import textwrap
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from beadsflow.application.errors import CommandError, ConfigError
@@ -104,11 +104,14 @@ class EpicRunLoop:
         if epic.issue_type is not IssueType.EPIC:
             raise ConfigError(f"{self.epic_id} is not an epic")
 
+        cache: dict[str, Issue] = {}
+        epic = self._refresh_completion_candidates(epic, cache=cache)
+
         if self._is_epic_complete(epic):
             self.logger.info("Epic complete.")
             return 0
 
-        selected = self._select_next_child(epic)
+        selected = self._select_next_child(epic, cache=cache)
         if selected is None:
             self.logger.info("No ready work found.")
             return 2
@@ -141,12 +144,23 @@ class EpicRunLoop:
                 self._run_reviewer(issue_id=next_work.issue_id)
                 return None
 
+    def _refresh_completion_candidates(self, epic: Issue, *, cache: dict[str, Issue]) -> Issue:
+        # Only a potential completion needs every summarized-closed child read.
+        # Reuse these reads if a reopened child becomes the selected work.
+        if self._is_epic_complete(epic):
+            children = []
+            for summary in epic.dependents:
+                child = self.beads.get_issue(summary.id)
+                cache[child.id] = child
+                children.append(replace(summary, status=child.status, title=child.title, priority=child.priority))
+            return replace(epic, dependents=children)
+
+        return epic
+
     def _is_epic_complete(self, epic: Issue) -> bool:
         return all(child.status is IssueStatus.CLOSED for child in epic.dependents)
 
-    def _select_next_child(self, epic: Issue) -> Issue | None:
-        cache: dict[str, Issue] = {}
-
+    def _select_next_child(self, epic: Issue, *, cache: dict[str, Issue]) -> Issue | None:
         def is_ready(child_id: str) -> bool:
             child = cache.get(child_id)
             if child is None:
@@ -203,6 +217,7 @@ class EpicRunLoop:
             kind="reviewer",
             profiles=self.settings.reviewers,
         )
+        requirements = self.beads.get_issue(issue_id).requirements_digest()
         before_sig = self._git_signature(exclude_beads=True)
         result = self._run_profile_command(profile=reviewer, issue_id=issue_id, phase="reviewer")
         if self._git_signature(exclude_beads=True) != before_sig:
@@ -212,6 +227,11 @@ class EpicRunLoop:
                 failure += f"\n\nLog:\n{log_path}"
             self._post_failure_comment(issue_id=issue_id, failure=failure)
             raise CommandError(failure)
+        if self.beads.get_issue(issue_id).requirements_digest() != requirements:
+            self._post_failure_comment(
+                issue_id=issue_id, failure="Changes requested: Issue requirements changed during review; review again."
+            )
+            raise CommandError("Issue requirements changed during review")
         self._maybe_comment_from_stdout(
             profile=reviewer,
             issue_id=issue_id,
@@ -231,22 +251,32 @@ class EpicRunLoop:
                     issue_id, "Ready for review: Worktree changed while publishing review; review again."
                 )
                 raise CommandError("Worktree changed while publishing review")
-            self.beads.comment(issue_id, f"LGTM\n\n{self._review_evidence(before_sig)}")
+            if self.beads.get_issue(issue_id).requirements_digest() != requirements:
+                self.beads.comment(
+                    issue_id, "Ready for review: Issue requirements changed while publishing review; review again."
+                )
+                raise CommandError("Issue requirements changed while publishing review")
+            self.beads.comment(issue_id, f"LGTM\n\n{self._review_evidence(before_sig, requirements)}")
 
     @staticmethod
-    def _review_evidence(signature: str) -> str:
-        digest = hashlib.sha256(signature.encode("utf-8", errors="surrogateescape")).hexdigest()
-        return f"Beadsflow reviewed Git signature: {digest}"
+    def _review_evidence(signature: str, requirements: str) -> str:
+        digest = hashlib.sha256(
+            signature.encode("utf-8", errors="surrogateescape") + b"\0" + requirements.encode("ascii")
+        )
+        return f"Beadsflow reviewed content v2: {digest.hexdigest()}"
 
     def _approval_matches(self, issue: Issue) -> bool:
+        signature = self._git_signature(exclude_beads=True)
+        # Git collection can take time: re-read requirements and verdict afterwards.
+        issue = self.beads.get_issue(issue.id)
         latest = max(
             (comment for comment in issue.comments if marker_from_text(comment.text) is not None),
             key=comment_order_key,
             default=None,
         )
-        if latest is None or not latest.text.splitlines()[-1].startswith("Beadsflow reviewed Git signature: "):
+        if latest is None or marker_from_text(latest.text) is not Marker.LGTM:
             return False
-        return latest.text.splitlines()[-1] == self._review_evidence(self._git_signature(exclude_beads=True))
+        return latest.text.splitlines()[-1] == self._review_evidence(signature, issue.requirements_digest())
 
     def _exec(self, *, argv: list[str], issue_id: str) -> CommandResult:
         return run_command(
