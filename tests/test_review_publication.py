@@ -455,7 +455,8 @@ def test_changed_requirements_cannot_approve_or_close(
     assert loop.beads.closed == []  # type: ignore[attr-defined]
     evidence = [c for c in loop.beads.comments if "Beadsflow reviewed" in c.text]  # type: ignore[attr-defined]
     assert len(evidence) == int(stage in {"resume", "close-check"})
-    assert loop.beads.comments[-1].text.startswith(("Ready for review:", "Changes requested:"))  # type: ignore[attr-defined]
+    # Changed requirements always request a fresh review, never re-implementation.
+    assert loop.beads.comments[-1].text.startswith("Ready for review:")  # type: ignore[attr-defined]
 
 
 def test_incidental_issue_updates_do_not_invalidate_approval(

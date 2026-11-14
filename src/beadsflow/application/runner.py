@@ -246,7 +246,7 @@ class EpicRunLoop:
             raise CommandError(failure)
         if self.beads.get_issue(issue_id).requirements_digest() != requirements:
             self._post_failure_comment(
-                issue_id=issue_id, failure="Changes requested: Issue requirements changed during review; review again."
+                issue_id=issue_id, failure="Ready for review: Issue requirements changed during review; review again."
             )
             raise CommandError("Issue requirements changed during review")
         self._maybe_comment_from_stdout(
