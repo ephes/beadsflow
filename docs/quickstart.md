@@ -379,8 +379,10 @@ Before reporting an epic complete, the runner refreshes every child in an all-cl
 ### Beads JSON admission
 
 Every `bd --json` response is decoded with duplicate object members refused at
-all nesting levels (including issue IDs, statuses and comments). Malformed JSON,
-excessive nesting, integer conversion limits and decoder resource failures become
+all nesting levels (including issue IDs, statuses and comments). Decoded
+responses may nest at most 64 levels below the root; a bounded iterative walk
+enforces this on every Python version, including otherwise unused fields.
+Malformed JSON, excessive nesting, integer conversion limits and decoder resource failures become
 a fixed `BeadsError` diagnostic without payload text. A malformed successful
 response is never retried; no profile or close/comment operation follows that
 failed read. Valid responses still pass the existing issue schema and identity

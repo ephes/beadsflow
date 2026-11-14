@@ -289,3 +289,17 @@ def test_valid_json_runs_actual_decoder(monkeypatch: pytest.MonkeyPatch) -> None
         lambda **kwargs: CommandResult([], 0, json.dumps([_issue()]), ""),
     )
     assert BeadsCli("synthetic").get_issue("epic-1").id == "epic-1"
+
+
+@pytest.mark.parametrize(("depth", "accepted"), [(64, True), (65, False)])
+def test_json_nesting_limit_is_explicit(monkeypatch: pytest.MonkeyPatch, depth: int, accepted: bool) -> None:
+    import beadsflow.infra.beads_cli as module
+
+    payload = "[" * depth + "0" + "]" * depth
+    monkeypatch.setattr(module, "run_command", lambda **kwargs: CommandResult([], 0, payload, ""))
+    cli = BeadsCli("synthetic")
+    if accepted:
+        assert cli._run_json("show", "epic-1") is not None
+    else:
+        with pytest.raises(BeadsError, match="^Invalid JSON from bd$"):
+            cli._run_json("show", "epic-1")
