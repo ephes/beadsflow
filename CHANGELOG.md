@@ -41,7 +41,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
-- Bind v2 approval evidence to canonical issue requirements as well as Git content; re-read requirements during review publication and before close. Changes and legacy Git-only evidence require fresh review; comments and timestamps do not invalidate approval.
+- Bind v2 approval evidence to canonical issue requirements as well as Git content; re-read requirements during review publication and before close. Git evidence is collected only for v2-evidenced approvals, so manual `LGTM` dry runs need no Git; a verdict changed during the close check is honored instead of forcing review. Changes and legacy Git-only evidence require fresh review; comments and timestamps do not invalidate approval.
 
 - Refresh all summarized-closed children before declaring epic completion; reuse authoritative reads for reopened work and fail closed on child read errors. Empty epics remain complete.
 

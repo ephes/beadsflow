@@ -518,3 +518,35 @@ def test_requirements_digest_canonicalizes_dependency_order_and_ignores_status(r
         dependencies=[Dependency("b", IssueStatus.OPEN, "related"), Dependency("a", IssueStatus.CLOSED)],
     )
     assert issue.requirements_digest() == changed.requirements_digest()
+
+
+def test_manual_lgtm_dry_run_needs_no_git(review_loop: EpicRunLoop, monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(self: EpicRunLoop, *, exclude_beads: bool = False) -> str:
+        pytest.fail("manual approval collected a Git signature")
+
+    review_loop.beads.comment("child", "Ready for review:")
+    review_loop.beads.comment("child", "LGTM")
+    monkeypatch.setattr(EpicRunLoop, "_git_signature", forbidden)
+    assert review_loop.run(once=True, dry_run=True, max_iterations=1) == 0
+    assert review_loop.beads.closed == []  # type: ignore[attr-defined]
+    assert review_loop.beads.comments[-1].text == "LGTM"  # type: ignore[attr-defined]
+
+
+def test_verdict_changed_during_close_check_is_not_overridden(
+    review_loop: EpicRunLoop,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = with_script(review_loop, "print('LGTM')")
+    assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+    original_signature = EpicRunLoop._git_signature
+
+    def signature(self: EpicRunLoop, *, exclude_beads: bool = False) -> str:
+        result = original_signature(self, exclude_beads=exclude_beads)
+        loop.beads.comment("child", "Changes requested: synthetic late verdict")
+        return result
+
+    monkeypatch.setattr(EpicRunLoop, "_git_signature", signature)
+    # No reviewer configured: a forced review would raise ConfigError.
+    assert replace(loop, reviewer_name=None).run(once=True, dry_run=False, max_iterations=1) == 0
+    assert loop.beads.closed == []  # type: ignore[attr-defined]
+    assert loop.beads.comments[-1].text == "Changes requested: synthetic late verdict"  # type: ignore[attr-defined]

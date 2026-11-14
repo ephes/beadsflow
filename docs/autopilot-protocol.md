@@ -166,6 +166,11 @@ runner reads requirements before review, after review before stdout publication,
 and again before publishing evidence. Changed requirements refuse the result and
 request review again. It also re-reads requirements and the latest verdict after
 collecting Git evidence immediately before close. Read failures stop the run.
+Git evidence is only collected when the latest `LGTM` carries a v2 digest line;
+legacy or manual approvals go straight to review, so dry runs stay Git-free. If
+the latest verdict is no longer `LGTM` after that re-read (a reviewer acted in
+the meantime), the iteration neither closes nor requests review and the next
+iteration follows the new verdict.
 Old Git-only approval evidence is stale and requires a fresh review. This remains
 a freshness check, not author authentication; edits restored between checks and
 external writes after the final check are outside this guarantee.

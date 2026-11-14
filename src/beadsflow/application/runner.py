@@ -12,7 +12,7 @@ from pathlib import Path
 from beadsflow.application.errors import CommandError, ConfigError
 from beadsflow.application.phase import Phase
 from beadsflow.application.select import determine_next_work, marker_from_text, select_next_child
-from beadsflow.domain.models import Issue, IssueStatus, IssueType, Marker, comment_order_key
+from beadsflow.domain.models import Comment, Issue, IssueStatus, IssueType, Marker, comment_order_key
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.command_log import write_command_log
 from beadsflow.infra.git_command import capture_git
@@ -76,6 +76,17 @@ def _cap_comment_body(*, body: str, prefix: str, suffix: str) -> str:
     return body
 
 
+REVIEW_EVIDENCE_PREFIX = "Beadsflow reviewed content v2: "
+
+
+def _latest_marker_comment(issue: Issue) -> Comment | None:
+    return max(
+        (comment for comment in issue.comments if marker_from_text(comment.text) is not None),
+        key=comment_order_key,
+        default=None,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class EpicRunLoop:
     beads: BeadsCli
@@ -118,7 +129,12 @@ class EpicRunLoop:
 
         next_work = determine_next_work(issue_id=selected.id, comments=selected.comments)
         phase = next_work.phase
-        stale_approval = phase is Phase.CLOSE and not self._approval_matches(selected)
+        approval = self._approval_state(selected) if phase is Phase.CLOSE else "current"
+        if approval == "superseded":
+            # A reviewer acted after selection; honor the new verdict next iteration.
+            self.logger.info(f"Review verdict for {selected.id} changed during approval check; re-evaluating.")
+            return None
+        stale_approval = approval == "stale"
         if stale_approval:
             phase = Phase.REVIEW
         self.logger.info(f"Selected {selected.id} ({phase.value}).")
@@ -132,17 +148,18 @@ class EpicRunLoop:
                 selected.id, "Ready for review: Approval evidence missing or stale; review current content."
             )
 
+        self._dispatch(phase=phase, issue_id=next_work.issue_id)
+        return None
+
+    def _dispatch(self, *, phase: Phase, issue_id: str) -> None:
         match phase:
             case Phase.CLOSE:
-                self.beads.close(next_work.issue_id)
-                self.logger.info(f"Closed {next_work.issue_id}.")
-                return None
+                self.beads.close(issue_id)
+                self.logger.info(f"Closed {issue_id}.")
             case Phase.IMPLEMENT:
-                self._run_implementer(issue_id=next_work.issue_id)
-                return None
+                self._run_implementer(issue_id=issue_id)
             case Phase.REVIEW:
-                self._run_reviewer(issue_id=next_work.issue_id)
-                return None
+                self._run_reviewer(issue_id=issue_id)
 
     def _refresh_completion_candidates(self, epic: Issue, *, cache: dict[str, Issue]) -> Issue:
         # Only a potential completion needs every summarized-closed child read.
@@ -263,20 +280,23 @@ class EpicRunLoop:
         digest = hashlib.sha256(
             signature.encode("utf-8", errors="surrogateescape") + b"\0" + requirements.encode("ascii")
         )
-        return f"Beadsflow reviewed content v2: {digest.hexdigest()}"
+        return f"{REVIEW_EVIDENCE_PREFIX}{digest.hexdigest()}"
 
-    def _approval_matches(self, issue: Issue) -> bool:
+    def _approval_state(self, issue: Issue) -> str:
+        """Classify close-phase approval as "current", "stale" or "superseded"."""
+        latest = _latest_marker_comment(issue)
+        if latest is None or not latest.text.splitlines()[-1].startswith(REVIEW_EVIDENCE_PREFIX):
+            # Legacy/manual approvals never need Git (dry runs stay Git-free).
+            return "stale"
         signature = self._git_signature(exclude_beads=True)
         # Git collection can take time: re-read requirements and verdict afterwards.
-        issue = self.beads.get_issue(issue.id)
-        latest = max(
-            (comment for comment in issue.comments if marker_from_text(comment.text) is not None),
-            key=comment_order_key,
-            default=None,
-        )
+        current = self.beads.get_issue(issue.id)
+        latest = _latest_marker_comment(current)
         if latest is None or marker_from_text(latest.text) is not Marker.LGTM:
-            return False
-        return latest.text.splitlines()[-1] == self._review_evidence(signature, issue.requirements_digest())
+            return "superseded"
+        if latest.text.splitlines()[-1] == self._review_evidence(signature, current.requirements_digest()):
+            return "current"
+        return "stale"
 
     def _exec(self, *, argv: list[str], issue_id: str) -> CommandResult:
         return run_command(
