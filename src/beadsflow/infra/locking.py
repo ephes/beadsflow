@@ -82,8 +82,9 @@ class EpicLock:
                 directory = child
             fd = os.open(path.name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
             try:
-                if not stat.S_ISREG(os.fstat(fd).st_mode):
-                    raise OSError("Lock must be a regular file")
+                metadata = os.fstat(fd)
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_uid != os.getuid():
+                    raise OSError("Lock must be a single-link regular file owned by the current user")
             except BaseException:
                 os.close(fd)
                 raise

@@ -273,7 +273,7 @@ errors. Status means the exact name is listed, including exited sessions that Ze
 can resurrect; the CLI's `running` label does not guarantee a live process.
 These output contracts are defined in [Zellij 0.45.1's session listing](https://github.com/zellij-org/zellij/blob/v0.45.1/zellij-utils/src/sessions.rs).
 
-Epic locks refuse symlinked components in the two directory levels above the lock file (`.beads/locks` for epic runs) and nonregular lock files before writing PID metadata. Contention and acquisition/PID-write failures close the handle and release any acquired lock, allowing a later retry.
+Both worktree and epic locks refuse symlinked components in the two directory levels above the lock file (`.beads/locks` for epic runs). Before writing PID metadata, the opened inode must be a single-link regular file owned by the current user. Hardlinked lock entries are refused without changing the aliased file. Contention and acquisition/PID-write failures close the handle and release any acquired lock, allowing a later retry.
 
 Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
 

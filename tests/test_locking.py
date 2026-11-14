@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -6,6 +9,74 @@ import pytest
 from beadsflow.application.errors import LockError
 from beadsflow.infra import locking
 from beadsflow.infra.locking import EpicLock, epic_lock_path
+
+
+def test_hardlinked_lock_refused_without_touching_victim(tmp_path: Path) -> None:
+    victim = tmp_path / "invented-victim"
+    victim.write_bytes(b"synthetic private bytes\x00\xff\n")
+    path = epic_lock_path(tmp_path / ".beads", "synthetic-1")
+    path.parent.mkdir(parents=True)
+    path.hardlink_to(victim)
+
+    with pytest.raises(LockError):
+        with EpicLock(path):
+            pass
+
+    assert victim.read_bytes() == b"synthetic private bytes\x00\xff\n"
+    assert path.stat().st_nlink == 2
+
+
+@pytest.mark.parametrize("unsafe", ["hardlink", "owner"])
+def test_unsafe_inode_closes_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsafe: str) -> None:
+    path = tmp_path / "lock"
+    path.write_bytes(b"synthetic sentinel")
+    if unsafe == "hardlink":
+        (tmp_path / "alias").hardlink_to(path)
+    else:
+        current_uid = os.getuid()
+        monkeypatch.setattr(locking.os, "getuid", lambda: current_uid + 1)
+
+    original_open = locking.os.open
+    opened: list[int] = []
+
+    def track_open(*args: Any, **kwargs: Any) -> int:
+        fd = original_open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    monkeypatch.setattr(locking.os, "open", track_open)
+    with pytest.raises(LockError):
+        with EpicLock(path):
+            pass
+    assert path.read_bytes() == b"synthetic sentinel"
+    assert opened
+    for fd in opened:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+
+def test_private_lock_excludes_another_process(tmp_path: Path) -> None:
+    path = epic_lock_path(tmp_path / ".beads", "synthetic-1")
+    contender = """
+import sys
+from pathlib import Path
+from beadsflow.application.errors import LockError
+from beadsflow.infra.locking import EpicLock
+try:
+    with EpicLock(Path(sys.argv[1])):
+        print("acquired")
+except LockError:
+    print("refused")
+"""
+    with EpicLock(path):
+        result = subprocess.run(
+            [sys.executable, "-c", contender, str(path)], capture_output=True, text=True, timeout=10, check=True
+        )
+        assert result.stdout == "refused\n"
+    result = subprocess.run(
+        [sys.executable, "-c", contender, str(path)], capture_output=True, text=True, timeout=10, check=True
+    )
+    assert result.stdout == "acquired\n"
 
 
 def test_symlink_file_refused(tmp_path: Path) -> None:
