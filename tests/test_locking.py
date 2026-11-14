@@ -172,8 +172,8 @@ def test_unsafe_inode_closes_descriptor(tmp_path: Path, monkeypatch: pytest.Monk
     if unsafe == "hardlink":
         (tmp_path / "alias").hardlink_to(path)
     else:
-        current_uid = os.getuid()
-        monkeypatch.setattr(locking.os, "getuid", lambda: current_uid + 1)
+        current_uid = os.geteuid()
+        monkeypatch.setattr(locking.os, "geteuid", lambda: current_uid + 1)
 
     original_open = locking.os.open
     opened: list[int] = []
@@ -184,7 +184,7 @@ def test_unsafe_inode_closes_descriptor(tmp_path: Path, monkeypatch: pytest.Monk
         return fd
 
     monkeypatch.setattr(locking.os, "open", track_open)
-    with pytest.raises(LockError):
+    with pytest.raises(LockError, match="single-link regular file owned by the current user"):
         with EpicLock(path):
             pass
     assert path.read_bytes() == b"synthetic sentinel"

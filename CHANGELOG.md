@@ -9,7 +9,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ### Security
 
 - Revalidate worktree/epic lock inode safety and file/directory name identities through pinned descriptors after `flock`, before PID writes or automation; refuse detected replacements without unlinking another holder's lock.
-- Refuse hardlinked or foreign-owned worktree/epic lock inodes before truncating or writing PID metadata; close descriptors on admission failure and preserve aliased file bytes.
+- Refuse hardlinked or foreign-owned worktree/epic lock inodes before truncating or writing PID metadata; close descriptors on admission failure and preserve aliased file bytes. Ownership is checked against the effective user, and the lock error now names the refusal reason.
 - Pass identities through quoted environment expansions in the quickstart Bash profiles instead of interpolating placeholders into shell source.
 - Reject malformed canonical issue, dependency and child IDs before selection, profile execution or subsequent Beads operations.
 - Bound each untracked fingerprint inventory to 64 MiB and a shared 30-second deadline; read only the opened snapshot size and refuse detected file changes. Incomplete evidence stops review/publication and approval revalidation without closing the issue or replacing approval state. The same budget applies to implementer `require_git_changes` checks; a failure after the implementer ran posts a fixed failure comment instead of stopping silently.

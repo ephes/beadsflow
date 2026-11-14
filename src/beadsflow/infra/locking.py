@@ -64,14 +64,14 @@ class EpicLock:
         except BlockingIOError as exc:
             raise LockError(f"Lock is already held: {self.lock_path}") from exc
         except OSError as exc:
-            raise LockError(f"Failed to acquire lock (unsafe path or I/O failure): {self.lock_path}") from exc
+            raise LockError(f"Failed to acquire lock (unsafe path or I/O failure): {self.lock_path}: {exc}") from exc
 
         return self
 
     @staticmethod
     def _check_inode(fd: int) -> None:
         metadata = os.fstat(fd)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_uid != os.getuid():
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_uid != os.geteuid():
             raise OSError("Lock must be a single-link regular file owned by the current user")
 
     def _open_safe(self, directories: ExitStack) -> tuple[int, list[tuple[int, str, int]]]:
