@@ -139,3 +139,130 @@ def test_config_numeric_boundaries(tmp_path: Path, interval: int, iterations: in
         iterations,
         timeout,
     )
+
+
+def test_config_byte_boundary_and_opened_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    path = tmp_path / "config.toml"
+    path.write_bytes(b"interval_seconds = 17\n#".ljust(65536, b"x"))
+    original_open = os.open
+    opens: list[int] = []
+
+    def open_config(
+        name: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        fd = original_open(name, flags, mode, dir_fd=dir_fd)
+        opens.append(fd)
+        path.rename(tmp_path / "original.toml")
+        path.write_text("interval_seconds = 99", encoding="utf-8")
+        return fd
+
+    monkeypatch.setattr(os, "open", open_config)
+    assert load_settings(config_path=path).interval_seconds == 17
+    assert len(opens) == 1
+    with pytest.raises(OSError):
+        os.fstat(opens[0])
+
+
+def test_growing_config_has_bounded_reads_and_closes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    from beadsflow.application.errors import ConfigError
+
+    path = tmp_path / "config.toml"
+    path.write_bytes(b"# small config")
+    original_read = os.read
+    reads: list[tuple[int, int]] = []
+
+    def read(fd: int, size: int) -> bytes:
+        if not reads:
+            with path.open("ab") as stream:
+                stream.write(b"x" * 131072)
+        result = original_read(fd, size)
+        reads.append((fd, len(result)))
+        return result
+
+    monkeypatch.setattr(os, "read", read)
+    with pytest.raises(ConfigError, match="Cannot read config"):
+        load_settings(config_path=path)
+    assert sum(size for _, size in reads) == 65537
+    with pytest.raises(OSError):
+        os.fstat(reads[0][0])
+
+
+@pytest.mark.parametrize("failure", [ValueError, RecursionError, MemoryError])
+def test_parser_resource_failures_have_value_free_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[Exception],
+) -> None:
+    import tomllib
+
+    from beadsflow.application.errors import ConfigError
+
+    path = tmp_path / "config.toml"
+    path.write_text("# valid synthetic config", encoding="utf-8")
+
+    def parse(text: str) -> dict[str, object]:
+        raise failure("private-sentinel")
+
+    monkeypatch.setattr(tomllib, "loads", parse)
+    with pytest.raises(ConfigError, match="Cannot read config") as caught:
+        load_settings(config_path=path)
+    assert "private-sentinel" not in str(caught.value)
+
+
+def test_config_regular_symlink_remains_supported(tmp_path: Path) -> None:
+    target = tmp_path / "target.toml"
+    target.write_text("interval_seconds = 7", encoding="utf-8")
+    link = tmp_path / "config.toml"
+    link.symlink_to(target)
+    assert load_settings(config_path=link).interval_seconds == 7
+
+
+def test_config_detects_in_place_change_below_byte_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    from beadsflow.application.errors import ConfigError
+
+    path = tmp_path / "config.toml"
+    path.write_bytes(b"# before")
+    original_read = os.read
+    changed = False
+
+    def read(fd: int, size: int) -> bytes:
+        nonlocal changed
+        chunk = original_read(fd, size)
+        if not changed:
+            path.write_bytes(b"# after!")
+            os.utime(path, ns=(0, 123456789))
+            changed = True
+        return chunk
+
+    monkeypatch.setattr(os, "read", read)
+    with pytest.raises(ConfigError, match="Cannot read config"):
+        load_settings(config_path=path)
+
+
+@pytest.mark.parametrize("levels,accepted", [(64, True), (65, False)])
+@pytest.mark.parametrize("kind", ["table", "array"])
+def test_decoded_config_depth_boundary(tmp_path: Path, levels: int, accepted: bool, kind: str) -> None:
+    from beadsflow.application.errors import ConfigError
+
+    path = tmp_path / "config.toml"
+    content = (
+        "[" + ".".join(["unused"] * levels) + "]"
+        if kind == "table"
+        else ("unused = " + "[" * (levels - 1) + "0" + "]" * (levels - 1))
+    )
+    path.write_text(content, encoding="utf-8")
+    if accepted:
+        assert load_settings(config_path=path).interval_seconds == 30
+    else:
+        with pytest.raises(ConfigError):
+            load_settings(config_path=path)

@@ -15,6 +15,15 @@ from beadsflow.domain.models import Comment, Dependency, Issue, IssueStatus, Iss
 from beadsflow.infra.run_command import CommandResult, run_command
 
 
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON member")
+        result[key] = value
+    return result
+
+
 def _text(value: object) -> str:
     if not isinstance(value, str):
         raise ValueError("expected text")
@@ -131,9 +140,9 @@ class BeadsCli:
     def _run_json(self, *args: str) -> Any:
         completed = self._run("--json", *args)
         try:
-            return json.loads(completed.stdout)
-        except json.JSONDecodeError as exc:  # pragma: no cover
-            raise BeadsError(f"Invalid JSON from bd: bd {' '.join(args)}") from exc
+            return json.loads(completed.stdout, object_pairs_hook=_unique_object)
+        except (ValueError, RecursionError, MemoryError) as exc:
+            raise BeadsError("Invalid JSON from bd") from exc
 
     def get_issue(self, issue_id: str) -> Issue:
         data = self._run_json("show", issue_id)

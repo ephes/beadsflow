@@ -50,7 +50,7 @@ command_timeout_seconds = 3600
 ```
 
 If no repo-root `beadsflow.toml` exists, defaults apply. An explicit `--config` or `BEADSFLOW_CONFIG` path must exist and be readable.
-Missing explicit files, read/UTF-8/TOML failures, and empty or incorrectly quoted profile commands fail with exit code 1 and a configuration diagnostic before locking or launching processes. File diagnostics include bounded path context and the error type, without dumping file contents or a traceback.
+Missing explicit files, read/UTF-8/TOML failures, and empty or incorrectly quoted profile commands fail with exit code 1 and a configuration diagnostic before locking or launching processes. Configs must be regular files of at most 64 KiB (65,536 bytes) with at most 64 nesting levels below the root. A bounded iterative walk checks decoded tables and arrays before settings conversion, including otherwise unused fields. The loader opens one nonblocking descriptor, checks its type and size, and reads at most 65,537 bytes to detect overflow even if the file grows. FIFOs, devices, directories, oversized files, detected in-place changes and parser depth/resource failures are refused; the descriptor is closed on success and refusal. Symlinks to regular files remain supported; validation and reading use the opened file. File diagnostics include bounded path context and the error type, without dumping file contents or a traceback.
 
 Numeric settings must be TOML integers (quoted numbers, floats, and booleans are rejected):
 
@@ -375,3 +375,14 @@ summaries cannot make a blocked, closed or non-resumable child eligible; selecti
 to the next eligible child.
 
 Before reporting an epic complete, the runner refreshes every child in an all-closed epic summary. Reopened children return to selection using the same per-iteration reads; a failed read stops completion. An empty epic is complete.
+
+### Beads JSON admission
+
+Every `bd --json` response is decoded with duplicate object members refused at
+all nesting levels (including issue IDs, statuses and comments). Malformed JSON,
+excessive nesting, integer conversion limits and decoder resource failures become
+a fixed `BeadsError` diagnostic without payload text. A malformed successful
+response is never retried; no profile or close/comment operation follows that
+failed read. Valid responses still pass the existing issue schema and identity
+checks. The shared command output cap also bounds the bytes received before
+JSON decoding.

@@ -224,3 +224,68 @@ def test_canonical_identity_policy_preserves_valid_ids(monkeypatch: pytest.Monke
     monkeypatch.setattr(BeadsCli, "_run_json", lambda self, *args: [raw])
     parsed = BeadsCli("synthetic").get_issue(identity)
     assert parsed.id == parsed.dependencies[0].id == parsed.dependents[0].id == identity
+
+
+def _decoder_payload(kind: str, issue_id: str) -> str:
+    raw = _issue()
+    raw["id"] = issue_id
+    if issue_id == "child-1":
+        raw["issue_type"] = "task"
+        raw["dependents"] = []
+    payload = json.dumps([raw])
+    if kind == "depth":
+        return payload[:-2] + ', "unused": ' + "[" * 2000 + "0" + "]" * 2000 + "}]"
+    if kind == "integer":
+        return payload[:-2] + ', "private-sentinel": ' + "9" * 5000 + "}]"
+    if kind == "duplicate-id":
+        return payload.replace(f'"id": "{issue_id}"', f'"id": "private-sentinel", "id": "{issue_id}"', 1)
+    if kind == "duplicate-status":
+        return payload.replace('"status": "open"', '"status": "closed", "status": "open"', 1)
+    return payload.replace('"text": "LGTM"', '"text": "private-sentinel", "text": "LGTM"', 1)
+
+
+@pytest.mark.parametrize("kind", ["depth", "integer", "duplicate-id", "duplicate-status", "duplicate-comment"])
+@pytest.mark.parametrize("where", ["epic-1", "child-1"])
+def test_decoder_failures_stop_cli_before_profile_or_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    kind: str,
+    where: str,
+) -> None:
+    import beadsflow.application.runner as runner
+    import beadsflow.infra.beads_cli as module
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".beads").mkdir()
+    for name in ("BEADSFLOW_CONFIG", "BEADSFLOW_INTERVAL"):
+        monkeypatch.delenv(name, raising=False)
+    calls: list[list[str]] = []
+
+    def run(*, argv: list[str], **kwargs: object) -> CommandResult:
+        calls.append(argv)
+        assert argv[2:4] == ["--json", "show"], "decoder failure reached a mutation"
+        payload = _decoder_payload(kind, where) if argv[-1] == where else json.dumps([_issue()])
+        return CommandResult(argv, 0, payload, "")
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("decoder failure reached a profile")
+
+    monkeypatch.setattr(module, "run_command", run)
+    monkeypatch.setattr(runner.EpicRunLoop, "_run_profile_command", forbidden)
+    assert main(["run", "epic-1", "--once"]) == 1
+    assert len(calls) == (1 if where == "epic-1" else 2)
+    assert "Invalid JSON from bd" in caplog.text
+    assert "private-sentinel" not in caplog.text
+    assert len(caplog.text) < 500
+
+
+def test_valid_json_runs_actual_decoder(monkeypatch: pytest.MonkeyPatch) -> None:
+    import beadsflow.infra.beads_cli as module
+
+    monkeypatch.setattr(
+        module,
+        "run_command",
+        lambda **kwargs: CommandResult([], 0, json.dumps([_issue()]), ""),
+    )
+    assert BeadsCli("synthetic").get_issue("epic-1").id == "epic-1"

@@ -137,7 +137,7 @@ Highest to lowest:
 
 ### Config discovery (v0.1)
 
-- Default config filename: `beadsflow.toml` at repo root.
+- Default config filename: `beadsflow.toml` at repo root. Config admission uses one nonblocking regular-file descriptor, a 64 KiB byte limit, bounded reads and at most 64 decoded nesting levels below the root; detected growth/change, nonregular inputs and UTF-8/TOML depth/resource failures stop before locking or automation with a value-free configuration error. A missing optional default still uses defaults.
 - Override via `--config <path>` or `BEADSFLOW_CONFIG`.
 
 ### Environment variables (v0.1)

@@ -8,6 +8,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Admit config files through one nonblocking regular descriptor with a 64 KiB limit, bounded reads and a 64-level decoded nesting limit; refuse detected changes/growth and normalize UTF-8/TOML depth/resource errors before automation. Missing optional default configs retain their behavior.
+- Reject duplicate JSON members at every level of Beads responses and normalize decoder value/depth/resource failures to payload-free errors without retry or downstream automation.
+
 - Revalidate worktree/epic lock inode safety and file/directory name identities through pinned descriptors after `flock`, before PID writes or automation; refuse detected replacements without unlinking another holder's lock.
 - Refuse hardlinked or foreign-owned worktree/epic lock inodes before truncating or writing PID metadata; close descriptors on admission failure and preserve aliased file bytes. Ownership is checked against the effective user, and the lock error now names the refusal reason.
 - Pass identities through quoted environment expansions in the quickstart Bash profiles instead of interpolating placeholders into shell source.
