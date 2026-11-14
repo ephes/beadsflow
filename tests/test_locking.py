@@ -1,14 +1,153 @@
 import os
+import select
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from beadsflow.application.errors import LockError
+from beadsflow.application.run_epic import RunEpicRequest, run_epic
+from beadsflow.application.runner import EpicRunLoop
 from beadsflow.infra import locking
 from beadsflow.infra.locking import EpicLock, epic_lock_path
+
+
+@contextmanager
+def hold_lock_in_process(path: Path) -> Iterator[None]:
+    holder = """
+import select, sys
+from pathlib import Path
+from beadsflow.infra.locking import EpicLock
+with EpicLock(Path(sys.argv[1])):
+    print("held", flush=True)
+    if not select.select([sys.stdin], [], [], 10)[0]:
+        raise RuntimeError("release deadline")
+    sys.stdin.readline()
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", holder, str(path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stdout is not None
+        assert select.select([process.stdout], [], [], 10)[0], "holder did not signal acquisition"
+        assert process.stdout.readline() == "held\n"
+        yield
+    finally:
+        try:
+            _, stderr = process.communicate("release\n", timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise
+        assert process.returncode == 0, stderr
+
+
+@pytest.mark.parametrize("swapped", ["file", "locks", "beads"])
+def test_named_inode_swap_refused_while_replacement_is_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, swapped: str
+) -> None:
+    path = epic_lock_path(tmp_path / ".beads", "synthetic-1")
+    path.parent.mkdir(parents=True)
+    path.write_text("original synthetic sentinel")
+    assert locking.fcntl is not None
+    original_flock = locking.fcntl.flock
+    original_metadata = path.stat()
+    original_open = locking.os.open
+    opened: list[int] = []
+    replacement_bytes: bytes | None = None
+    monkeypatch.chdir(tmp_path)
+    for variable in os.environ:
+        if variable.startswith("BEADSFLOW_"):
+            monkeypatch.delenv(variable)
+
+    def refuse_automation(*args: Any, **kwargs: Any) -> int:
+        pytest.fail("lost lock capability admitted Beads/agent work")
+
+    monkeypatch.setattr(EpicRunLoop, "run", refuse_automation)
+
+    def track_open(*args: Any, **kwargs: Any) -> int:
+        fd = original_open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    # The original descriptor is open, but not locked yet. Keep the replacement
+    # locked in another process until the first contender has refused entry.
+    with ExitStack() as replacement:
+
+        def swap_before_flock(fd: int, operation: int) -> None:
+            nonlocal replacement_bytes
+            if operation == locking.fcntl.LOCK_EX | locking.fcntl.LOCK_NB and os.path.samestat(
+                os.fstat(fd), original_metadata
+            ):
+                target = {"file": path, "locks": path.parent, "beads": path.parent.parent}[swapped]
+                target.rename(tmp_path / "retired")
+                replacement.enter_context(hold_lock_in_process(path))
+                replacement_bytes = path.read_bytes()
+            original_flock(fd, operation)
+
+        monkeypatch.setattr(locking.os, "open", track_open)
+        monkeypatch.setattr(locking.fcntl, "flock", swap_before_flock)
+        request = RunEpicRequest(
+            epic_id="synthetic-1",
+            beads_dir=str(path.parent.parent),
+            config_path=None,
+            once=True,
+            interval_seconds=None,
+            dry_run=False,
+        )
+        assert run_epic(request) == 1
+        assert replacement_bytes is not None
+        assert replacement_bytes.startswith(b"pid=")
+        retired = tmp_path / "retired"
+        if swapped == "locks":
+            retired /= path.name
+        elif swapped == "beads":
+            retired = retired / "locks" / path.name
+        assert retired.read_text() == "original synthetic sentinel"
+        for fd in opened:
+            with pytest.raises(OSError):
+                os.fstat(fd)
+        assert path.read_bytes() == replacement_bytes
+
+    monkeypatch.undo()
+    with EpicLock(path):
+        pass
+
+
+@pytest.mark.parametrize("change", ["hardlink", "unlink", "symlink"])
+def test_inode_readmitted_after_flock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str) -> None:
+    path = tmp_path / "lock"
+    path.write_text("synthetic sentinel")
+    assert locking.fcntl is not None
+    original_flock = locking.fcntl.flock
+
+    def change_before_flock(fd: int, operation: int) -> None:
+        if operation == locking.fcntl.LOCK_EX | locking.fcntl.LOCK_NB:
+            if change == "hardlink":
+                (tmp_path / "alias").hardlink_to(path)
+            elif change == "unlink":
+                path.unlink()
+            else:
+                path.rename(tmp_path / "original")
+                path.symlink_to(tmp_path / "original")
+        original_flock(fd, operation)
+
+    monkeypatch.setattr(locking.fcntl, "flock", change_before_flock)
+    failed = EpicLock(path)
+    with pytest.raises(LockError):
+        with failed:
+            pytest.fail("changed lock admitted protected work")
+    assert failed._file.closed
+    if path.exists():
+        assert path.read_text() == "synthetic sentinel"
 
 
 def test_hardlinked_lock_refused_without_touching_victim(tmp_path: Path) -> None:

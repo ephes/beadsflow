@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Revalidate worktree/epic lock inode safety and file/directory name identities through pinned descriptors after `flock`, before PID writes or automation; refuse detected replacements without unlinking another holder's lock.
 - Refuse hardlinked or foreign-owned worktree/epic lock inodes before truncating or writing PID metadata; close descriptors on admission failure and preserve aliased file bytes.
 - Pass identities through quoted environment expansions in the quickstart Bash profiles instead of interpolating placeholders into shell source.
 - Reject malformed canonical issue, dependency and child IDs before selection, profile execution or subsequent Beads operations.

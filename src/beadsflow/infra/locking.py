@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import stat
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
@@ -39,21 +40,27 @@ class EpicLock:
             raise LockError("File locking is not supported on this platform")
 
         try:
-            fd = self._open_safe()
-            try:
-                self._file = os.fdopen(fd, "a+", encoding="utf-8")
-            except BaseException:
-                os.close(fd)
-                raise
-            try:
-                fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                self._file.seek(0)
-                self._file.truncate(0)
-                self._file.write(f"pid={os.getpid()}\n")
-                self._file.flush()
-            except BaseException:
-                self._file.close()  # Closing also releases any acquired flock.
-                raise
+            with ExitStack() as failed_acquisition:
+                with ExitStack() as directories:
+                    fd, chain = self._open_safe(directories)
+                    try:
+                        self._file = os.fdopen(fd, "a+", encoding="utf-8")
+                    except BaseException:
+                        os.close(fd)
+                        raise
+                    # Closing also releases any acquired flock, including when
+                    # closing a directory descriptor fails after the PID write.
+                    failed_acquisition.callback(self._file.close)
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self._check_inode(fd)
+                    for parent, name, child in chain:
+                        if not os.path.samestat(os.stat(name, dir_fd=parent, follow_symlinks=False), os.fstat(child)):
+                            raise OSError("Lock path changed during acquisition")
+                    self._file.seek(0)
+                    self._file.truncate(0)
+                    self._file.write(f"pid={os.getpid()}\n")
+                    self._file.flush()
+                failed_acquisition.pop_all()
         except BlockingIOError as exc:
             raise LockError(f"Lock is already held: {self.lock_path}") from exc
         except OSError as exc:
@@ -61,36 +68,41 @@ class EpicLock:
 
         return self
 
-    def _open_safe(self) -> int:
+    @staticmethod
+    def _check_inode(fd: int) -> None:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_uid != os.getuid():
+            raise OSError("Lock must be a single-link regular file owned by the current user")
+
+    def _open_safe(self, directories: ExitStack) -> tuple[int, list[tuple[int, str, int]]]:
         # Traverse using directory descriptors so checks cannot race with symlink swaps.
         path = self.lock_path.absolute()
         # Epic locks live under <trusted repo>/.beads/locks/<name>.
         # Resolve the trusted prefix, but never the two lock-directory levels.
         prefix = path.parent.parent.parent.resolve(strict=True)
         directory = os.open(prefix, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            for component in path.parts[-3:-1]:
-                try:
-                    child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
-                except FileNotFoundError:
-                    try:
-                        os.mkdir(component, dir_fd=directory)
-                    except FileExistsError:
-                        pass
-                    child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
-                os.close(directory)
-                directory = child
-            fd = os.open(path.name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
+        directories.callback(os.close, directory)
+        chain: list[tuple[int, str, int]] = []
+        for component in path.parts[-3:-1]:
             try:
-                metadata = os.fstat(fd)
-                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or metadata.st_uid != os.getuid():
-                    raise OSError("Lock must be a single-link regular file owned by the current user")
-            except BaseException:
-                os.close(fd)
-                raise
-            return fd
-        finally:
-            os.close(directory)
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(component, dir_fd=directory)
+                except FileExistsError:
+                    pass
+                child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            directories.callback(os.close, child)
+            chain.append((directory, component, child))
+            directory = child
+        fd = os.open(path.name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
+        try:
+            self._check_inode(fd)
+        except BaseException:
+            os.close(fd)
+            raise
+        chain.append((directory, path.name, fd))
+        return fd, chain
 
     def __exit__(
         self,

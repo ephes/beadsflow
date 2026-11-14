@@ -275,6 +275,15 @@ These output contracts are defined in [Zellij 0.45.1's session listing](https://
 
 Both worktree and epic locks refuse symlinked components in the two directory levels above the lock file (`.beads/locks` for epic runs). Before writing PID metadata, the opened inode must be a single-link regular file owned by the current user. Hardlinked lock entries are refused without changing the aliased file. Contention and acquisition/PID-write failures close the handle and release any acquired lock, allowing a later retry.
 
+After acquiring `flock` and before writing PID metadata or entering automation,
+beadsflow repeats inode admission and checks that the lock filename and both
+directory names still identify the opened inodes through pinned directory
+descriptors. A detected replacement, removal or redirection fails closed and
+releases the opened lock without unlinking any entry or changing the replacement
+holder's metadata. Keep lock files and their directories in place for the entire
+run; these checks detect changes during acquisition, but do not lock the
+directory namespace or prevent external changes after admission.
+
 Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
 
 Runner profile commands on macOS/Linux execute in an owned process group. On timeout or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. This applies to runner profiles and the standalone `beadsflow review` helper.

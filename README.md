@@ -6,8 +6,12 @@ Standalone tool/package for automating Beads-driven work (epic → child beads) 
 
 Worktree and epic locks admit only single-link regular files owned by the current
 user. Hardlinks, symlinks and nonregular files are refused before PID metadata is
-written; an aliased file is left untouched. See the [locking notes](docs/quickstart.md)
-for concurrency and filesystem assumptions.
+written; an aliased file is left untouched. After acquiring the lock, beadsflow
+rechecks the file and both directory names through pinned directory descriptors.
+A detected replacement stops the run before Beads or agent work without removing
+the replacement. Keep lock names and directories stable during a run; this
+admission check does not lock the filesystem namespace. See the
+[locking notes](docs/quickstart.md) for concurrency and filesystem assumptions.
 
 ## Dev quickstart
 
