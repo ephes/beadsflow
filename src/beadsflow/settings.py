@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,9 @@ from typing import Any
 
 from beadsflow.application.errors import ConfigError
 from beadsflow.infra.run_command import CommandSpec
+
+MAX_CONFIG_BYTES = 64 * 1024
+MAX_CONFIG_DEPTH = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,14 +126,51 @@ def _parse_run_settings(value: Any, base: RunSettings) -> RunSettings:
     )
 
 
+def _read_config(config_path: Path) -> str:
+    fd = os.open(config_path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_CONFIG_BYTES:
+            raise ValueError("Config must be a regular file within the byte limit")
+        data = bytearray()
+        while len(data) <= MAX_CONFIG_BYTES:
+            chunk = os.read(fd, min(8192, MAX_CONFIG_BYTES + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(fd)
+        if len(data) > MAX_CONFIG_BYTES or (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise ValueError("Config exceeds byte limit or changed while reading")
+        return data.decode("utf-8")
+    finally:
+        os.close(fd)
+
+
+def _validate_config_depth(raw: object) -> None:
+    pending: list[tuple[object, int]] = [(raw, 0)]
+    while pending:
+        value, depth = pending.pop()
+        if depth > MAX_CONFIG_DEPTH:
+            raise ValueError("Config exceeds nesting limit")
+        if isinstance(value, dict):
+            pending.extend((child, depth + 1) for child in value.values())
+        elif isinstance(value, list):
+            pending.extend((child, depth + 1) for child in value)
+
+
 def load_settings(*, config_path: Path | None) -> Settings:
     settings = Settings.defaults()
     if config_path is None:
         return settings
 
     try:
-        raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        raw = tomllib.loads(_read_config(config_path))
+        _validate_config_depth(raw)
+    except (OSError, ValueError, RecursionError, MemoryError) as exc:
         path_context = repr(str(config_path)[:200])
         raise ConfigError(f"Cannot read config {path_context} ({type(exc).__name__})") from exc
     if not isinstance(raw, dict):

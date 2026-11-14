@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import pytest
@@ -76,14 +77,20 @@ def test_config_errors_return_cli_failure(
         path.write_text(f'[implementers.fake]\ncommand = "{command}"', encoding="utf-8")
     elif failure == "unreadable":
         path.write_text("", encoding="utf-8")
-        original_read = Path.read_text
+        original_open = os.open
 
-        def unreadable(self: Path, *args: object, **kwargs: object) -> str:
-            if self == path:
+        def unreadable(
+            name: str | os.PathLike[str],
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            if name == path:
                 raise PermissionError("synthetic denial")
-            return original_read(self, *args, **kwargs)  # type: ignore[arg-type]
+            return original_open(name, flags, mode, dir_fd=dir_fd)
 
-        monkeypatch.setattr(Path, "read_text", unreadable)
+        monkeypatch.setattr(os, "open", unreadable)
     args = ["--config", str(path)] if source == "cli" else []
     if source == "env":
         monkeypatch.setenv("BEADSFLOW_CONFIG", str(path))
@@ -108,3 +115,65 @@ def test_absent_discovered_config_uses_defaults(tmp_path: Path, monkeypatch: pyt
 
     monkeypatch.setattr(EpicRunLoop, "run", run)
     assert main(["run", "epic-1", "--beads-dir", str(tmp_path / ".beads"), "--once"]) == 0
+
+
+@pytest.mark.parametrize("source", ["cli", "env", "default"])
+@pytest.mark.parametrize("failure", ["oversize", "depth", "depth-table", "integer", "directory"])
+def test_config_resource_failures_stop_before_work(
+    isolated_run: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    source: str,
+    failure: str,
+) -> None:
+    path = isolated_run / ("beadsflow.toml" if source == "default" else "config.toml")
+    if failure == "directory":
+        path.mkdir()
+    else:
+        content = {
+            "oversize": "# private-sentinel" + "x" * 65536,
+            "depth": "unused = " + "[" * 2000 + "0" + "]" * 2000,
+            "depth-table": "[beads_dir." + "nested." * 1500 + "leaf]",
+            "integer": "unused = " + "9" * 5000,
+        }[failure]
+        path.write_text(content, encoding="utf-8")
+    args = ["--config", str(path)] if source == "cli" else []
+    if source == "env":
+        monkeypatch.setenv("BEADSFLOW_CONFIG", str(path))
+    with caplog.at_level(logging.ERROR, logger="beadsflow"):
+        assert main(["run", "epic-1", "--once", *args]) == 1
+    assert "Cannot read config" in caplog.text
+    assert "private-sentinel" not in caplog.text
+    assert "Traceback" not in caplog.text
+    assert not (isolated_run / ".beads" / "locks").exists()
+
+
+def test_fifo_config_fails_promptly_without_backend_or_profile(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    path = tmp_path / "config.toml"
+    os.mkfifo(path)
+    (tmp_path / ".beads").mkdir()
+    script = """
+from unittest.mock import patch
+from beadsflow.entrypoints.cli import main
+import sys
+with (
+    patch("beadsflow.infra.beads_cli.run_command", side_effect=AssertionError("backend launched")),
+    patch("beadsflow.application.runner.EpicRunLoop._run_profile_command",
+          side_effect=AssertionError("profile launched")),
+):
+    assert main(["run", "epic-1", "--once", "--config", sys.argv[1]]) == 1
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(path)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=3,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Cannot read config" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not (tmp_path / ".beads" / "locks").exists()

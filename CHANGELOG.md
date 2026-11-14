@@ -8,6 +8,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Admit config files through one nonblocking regular descriptor with a 64 KiB limit, bounded reads and a 64-level decoded nesting limit; refuse detected changes/growth and normalize UTF-8/TOML depth/resource errors before automation. Missing optional default configs retain their behavior.
+- Reject duplicate JSON members at every level of Beads responses and enforce a 64-level decoded nesting limit on every Python version, and normalize decoder value/depth/resource failures to payload-free errors without retry or downstream automation.
+
 - Revalidate worktree/epic lock inode safety and file/directory name identities through pinned descriptors after `flock`, before PID writes or automation; refuse detected replacements without unlinking another holder's lock.
 - Refuse hardlinked or foreign-owned worktree/epic lock inodes before truncating or writing PID metadata; close descriptors on admission failure and preserve aliased file bytes. Ownership is checked against the effective user, and the lock error now names the refusal reason.
 - Pass identities through quoted environment expansions in the quickstart Bash profiles instead of interpolating placeholders into shell source.
@@ -37,6 +40,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Truncate stdout-based comments by default to avoid oversized Beads entries; configure via `BEADSFLOW_MAX_COMMENT_BYTES` and `BEADSFLOW_MAX_COMMENT_LINES`.
 
 ### Fixed
+
+- Bind v2 approval evidence to canonical issue requirements as well as Git content; re-read requirements during review publication and before close. Git evidence is collected only for v2-evidenced approvals, so manual `LGTM` dry runs need no Git; a verdict changed during the close check is honored instead of forcing review. Changes and legacy Git-only evidence require fresh review; comments and timestamps do not invalidate approval.
+
+- Refresh all summarized-closed children before declaring epic completion; reuse authoritative reads for reopened work and fail closed on child read errors. Empty epics remain complete.
 
 - Compare complete session names using Zellij's short, unformatted list output; avoid ANSI/display-prefix status errors. Normalize interactive start/attach launch failures to safe operation errors while preserving terminal inheritance and interactive lifetimes.
 

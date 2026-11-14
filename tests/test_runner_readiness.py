@@ -105,3 +105,93 @@ def test_refreshed_child_status_gates_dispatch(
     assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
     eligible = current_status is IssueStatus.OPEN or (resume and current_status is IssueStatus.IN_PROGRESS)
     assert dispatched == [first.id if eligible else second.id]
+
+
+@pytest.mark.parametrize("status", list(IssueStatus))
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_completion_refreshes_closed_summaries_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    status: IssueStatus,
+    dry_run: bool,
+) -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    child = Issue("child", "Current child", status, 1, IssueType.TASK, now, now, [], [], [])
+    epic = replace(
+        child,
+        id="epic",
+        issue_type=IssueType.EPIC,
+        dependents=[IssueSummary(child.id, "Stale child", IssueStatus.CLOSED, 1, now)],
+    )
+    reads: list[str] = []
+
+    class FakeBeads:
+        def get_issue(self, issue_id: str) -> Issue:
+            reads.append(issue_id)
+            return epic if issue_id == epic.id else child
+
+    dispatched: list[str] = []
+    monkeypatch.setattr(EpicRunLoop, "_run_implementer", lambda self, *, issue_id: dispatched.append(issue_id))
+    loop = EpicRunLoop(
+        beads=FakeBeads(),  # type: ignore[arg-type]
+        epic_id=epic.id,
+        settings=Settings.defaults(),
+        repo_paths=RepoPaths(tmp_path, tmp_path / ".beads"),
+        implementer_name="synthetic",
+        reviewer_name=None,
+        logger=logging.getLogger("test.completion"),
+    )
+    with caplog.at_level(logging.INFO):
+        assert loop.run(once=True, dry_run=dry_run, max_iterations=1) == (2 if status is IssueStatus.BLOCKED else 0)
+    assert reads == ["epic", "child"]
+    assert ("Epic complete." in caplog.text) == (status is IssueStatus.CLOSED)
+    eligible = status in {IssueStatus.OPEN, IssueStatus.IN_PROGRESS}
+    assert dispatched == (["child"] if eligible and not dry_run else [])
+
+
+@pytest.mark.parametrize("empty", [True, False])
+def test_empty_epic_completes_but_child_read_failure_stops(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    empty: bool,
+) -> None:
+    from beadsflow.application.errors import BeadsError
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    epic = Issue(
+        "epic",
+        "Epic",
+        IssueStatus.OPEN,
+        1,
+        IssueType.EPIC,
+        now,
+        now,
+        [],
+        [] if empty else [IssueSummary("child", "Child", IssueStatus.CLOSED, 1, now)],
+        [],
+    )
+
+    class FakeBeads:
+        def get_issue(self, issue_id: str) -> Issue:
+            if issue_id != "epic":
+                raise BeadsError("Synthetic child read failure")
+            return epic
+
+    loop = EpicRunLoop(
+        beads=FakeBeads(),  # type: ignore[arg-type]
+        epic_id=epic.id,
+        settings=Settings.defaults(),
+        repo_paths=RepoPaths(tmp_path, tmp_path / ".beads"),
+        implementer_name=None,
+        reviewer_name=None,
+        logger=logging.getLogger("test.completion"),
+    )
+    with caplog.at_level(logging.INFO):
+        if empty:
+            assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+            assert "Epic complete." in caplog.text
+        else:
+            with pytest.raises(BeadsError, match="child read failure"):
+                loop.run(once=True, dry_run=False, max_iterations=1)
+            assert "Epic complete." not in caplog.text

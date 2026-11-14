@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -68,3 +70,16 @@ class Issue:
     comments: list[Comment]
     description: str = ""
     acceptance_criteria: str = ""
+
+    def requirements_digest(self) -> str:
+        """Canonical reviewed requirements, excluding scheduling and discussion state."""
+        context = {
+            "id": self.id,
+            "title": self.title,
+            "issue_type": self.issue_type.value,
+            "description": self.description,
+            "acceptance_criteria": self.acceptance_criteria,
+            "dependencies": sorted((dep.id, dep.dependency_type) for dep in self.dependencies),
+        }
+        canonical = json.dumps(context, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("ascii")).hexdigest()

@@ -14,6 +14,31 @@ from beadsflow.application.errors import BeadsError
 from beadsflow.domain.models import Comment, Dependency, Issue, IssueStatus, IssueSummary, IssueType
 from beadsflow.infra.run_command import CommandResult, run_command
 
+# Beads issue payloads are shallow; refuse deeper nesting explicitly because
+# CPython 3.12+ decodes far deeper JSON without raising RecursionError.
+MAX_JSON_DEPTH = 64
+
+
+def _validate_json_depth(raw: object) -> None:
+    pending: list[tuple[object, int]] = [(raw, 0)]
+    while pending:
+        value, depth = pending.pop()
+        if depth > MAX_JSON_DEPTH:
+            raise ValueError("JSON exceeds nesting limit")
+        if isinstance(value, dict):
+            pending.extend((child, depth + 1) for child in value.values())
+        elif isinstance(value, list):
+            pending.extend((child, depth + 1) for child in value)
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON member")
+        result[key] = value
+    return result
+
 
 def _text(value: object) -> str:
     if not isinstance(value, str):
@@ -131,9 +156,11 @@ class BeadsCli:
     def _run_json(self, *args: str) -> Any:
         completed = self._run("--json", *args)
         try:
-            return json.loads(completed.stdout)
-        except json.JSONDecodeError as exc:  # pragma: no cover
-            raise BeadsError(f"Invalid JSON from bd: bd {' '.join(args)}") from exc
+            data = json.loads(completed.stdout, object_pairs_hook=_unique_object)
+            _validate_json_depth(data)
+            return data
+        except (ValueError, RecursionError, MemoryError) as exc:
+            raise BeadsError("Invalid JSON from bd") from exc
 
     def get_issue(self, issue_id: str) -> Issue:
         data = self._run_json("show", issue_id)
