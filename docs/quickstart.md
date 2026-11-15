@@ -271,6 +271,8 @@ unsupported format flag is reported as a list failure.
 Zellij's exit-1 empty-list diagnostic maps to `not running`; other failures remain
 errors. Status means the exact name is listed, including exited sessions that Zellij
 can resurrect; the CLI's `running` label does not guarantee a live process.
+Inventory capture has a combined 1 MiB stdout/stderr budget. Overflow fails with a fixed diagnostic, without printing captured output; timeout and overflow retire the owned inventory process group. Interactive commands retain the terminal.
+
 These output contracts are defined in [Zellij 0.45.1's session listing](https://github.com/zellij-org/zellij/blob/v0.45.1/zellij-utils/src/sessions.rs).
 
 Both worktree and epic locks refuse symlinked components in the two directory levels above the lock file (`.beads/locks` for epic runs). Before writing PID metadata, the opened inode must be a single-link regular file owned by the current user. Hardlinked lock entries are refused without changing the aliased file. The refusal message names the reason; if a stale lock file was left by another user (for example a root or container run) or was hardlinked by backup/sync tooling, remove that file (no beadsflow run may be active) and retry. Contention and acquisition/PID-write failures close the handle and release any acquired lock, allowing a later retry.
@@ -286,7 +288,7 @@ directory namespace or prevent external changes after admission.
 
 Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
 
-Runner profile commands on macOS/Linux execute in an owned process group. On timeout or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. This applies to runner profiles and the standalone `beadsflow review` helper.
+Runner profile commands on macOS/Linux execute in an owned process group. On timeout, overflow or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. On ordinary completion (including a nonzero exit), remaining group members also receive TERM/KILL before the result returns or execution locks are released. The leader stays unreaped until the last signal, preventing process-group ID reuse, and its real exit code/output are preserved. Commands must not rely on background group members continuing after the leader exits. This applies to runner profiles and the standalone `beadsflow review` helper.
 
 Runner profiles, standalone reviewer commands and internal Beads commands have a hard 8 MiB combined stdout/stderr
 capture limit per command. Git context/signature commands have a separate 64 MiB cap

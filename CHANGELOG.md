@@ -41,6 +41,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Retire residual owned process-group members after successful or failed leader exit, before returning or releasing execution locks; retain the unreaped leader through cleanup to prevent group ID reuse and preserve its real outcome.
+- Bound Zellij session inventory to 1 MiB combined stdout/stderr with safe overflow diagnostics and process-group cleanup; preserve exact session-name and no-session handling.
+
 - Bind v2 approval evidence to canonical issue requirements as well as Git content; re-read requirements during review publication and before close. Git evidence is collected only for v2-evidenced approvals, so manual `LGTM` dry runs need no Git; a verdict changed during the close check is honored instead of forcing review. Changes and legacy Git-only evidence require fresh review; comments and timestamps do not invalidate approval.
 
 - Refresh all summarized-closed children before declaring epic completion; reuse authoritative reads for reopened work and fail closed on child read errors. Empty epics remain complete.
