@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+import select
 import selectors
 import shlex
 import signal
 import subprocess
+import sys
 import time
 from collections.abc import Sequence
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -83,7 +86,11 @@ def run_command(
     limit: Literal["timeout", "output"] | None = None
     try:
         _drain(process, output, timeout_seconds, max_output_bytes)
-        code = process.returncode
+        # Keep the exited leader unreaped until the last group signal. Its PID
+        # pins the group identity, even if every descendant has already exited.
+        _signal_group(process, signal.SIGTERM)
+        _signal_group(process, signal.SIGKILL)
+        code = process.wait()
     except _OutputLimitExceeded:
         _stop_group(process, output, max_output_bytes)
         code = 125
@@ -134,18 +141,50 @@ def _drain(
                 key.data[0].extend(chunk[:available])
                 if len(chunk) > available and fail_on_overflow:
                     raise _OutputLimitExceeded
-    process.wait(timeout=max(0, deadline - time.monotonic()))
+    _wait_for_exit(process, max(0, deadline - time.monotonic()))
+
+
+def _wait_for_exit(process: subprocess.Popen[bytes] | subprocess.Popen[str], timeout_seconds: float) -> None:
+    """Observe exit without reaping: cleanup must retain the process-group identity."""
+    if sys.platform == "darwin":
+        # macOS has kqueue but Python does not expose waitid there. Registering an
+        # unreaped, already-exited child also delivers NOTE_EXIT immediately.
+        with closing(select.kqueue()) as queue:
+            event = select.kevent(
+                process.pid,
+                filter=select.KQ_FILTER_PROC,
+                flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                fflags=select.KQ_NOTE_EXIT,
+            )
+            if queue.control([event], 1, timeout_seconds):
+                return
+    else:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            if os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.01, remaining))
+    raise subprocess.TimeoutExpired(process.args, timeout_seconds)
 
 
 def _signal_group(process: subprocess.Popen[bytes] | subprocess.Popen[str], sig: signal.Signals) -> None:
+    # Never signal a group after reaping its leader: that ID may have been reused.
+    if process.returncode is not None:
+        return
     try:
         os.killpg(process.pid, sig)
     except ProcessLookupError:
         pass
     except PermissionError:
         # macOS can reject signalling a group containing only a zombie leader.
-        if process.poll() is None:
-            raise
+        # Observe without poll(), which would reap and release the group identity.
+        try:
+            _wait_for_exit(process, 0)
+        except subprocess.TimeoutExpired:
+            raise PermissionError("Cannot signal owned process group") from None
 
 
 def _stop_group(process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int) -> None:

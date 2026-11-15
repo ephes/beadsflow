@@ -47,6 +47,7 @@ class IssueSummary:
     status: IssueStatus
     priority: int
     created_at: datetime
+    dependency_type: str
 
 
 @dataclass(frozen=True, slots=True)

@@ -23,7 +23,13 @@ def _issue() -> dict[str, Any]:
         "updated_at": "2026-01-01T01:00:00+01:00",
         "dependencies": [{"id": "dep-1", "status": "closed"}],
         "dependents": [
-            {"id": "child-1", "title": "Synthetic child", "status": "open", "created_at": "2026-01-01T00:00:00Z"}
+            {
+                "id": "child-1",
+                "title": "Synthetic child",
+                "status": "open",
+                "created_at": "2026-01-01T00:00:00Z",
+                "dependency_type": "parent-child",
+            }
         ],
         "comments": [{"id": 1, "text": "LGTM", "author": "synthetic", "created_at": "2026-01-01T00:00:00Z"}],
     }

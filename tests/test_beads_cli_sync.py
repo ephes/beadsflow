@@ -175,7 +175,13 @@ def test_dry_run_never_imports_out_of_sync_database(
                 "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
                 "dependents": [
-                    {"id": "child", "title": "Child", "status": "open", "created_at": "2026-01-01T00:00:00Z"}
+                    {
+                        "id": "child",
+                        "title": "Child",
+                        "status": "open",
+                        "created_at": "2026-01-01T00:00:00Z",
+                        "dependency_type": "parent-child",
+                    }
                 ],
             }
         ]

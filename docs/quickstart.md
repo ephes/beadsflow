@@ -109,6 +109,15 @@ comment_mode = "stdout"
 `--cli` is parsed with `shlex.split(...)`, so you can pass a full command (e.g., `--cli "claude --model opus"`).
 Use `--prompt-arg` to match the flag your CLI uses to receive the prompt (default: `-p`).
 
+The configured reviewer interface passes the prompt as one command argument. The
+**complete prompt** must fit 64 KiB of UTF-8, including title, description,
+acceptance criteria, comment headers, Git status/stat and formatting. This cap is
+separate from the patch/comment truncation settings. An oversized, unencodable or
+NUL-containing prompt is refused before reviewer launch, with a nonzero exit and
+no review comment/approval. Requirements are never silently shortened to fit.
+Reduce the issue or Git context and retry; this interface does not configure a
+stdin/file prompt transport.
+
 The standalone helper limits its reviewer command to 3600 seconds by default, matching the runner default. Set `beadsflow review --timeout-seconds 120` to override (positive integer). Configure this explicitly alongside `run.command_timeout_seconds` when using a different runner deadline; allow the outer runner enough time for context collection and cleanup. A timeout exits nonzero, writes a diagnostic to stderr, and prints no review comment or approval, even if the command emitted partial output. The shared command runner terminates the owned process group and waits for the direct reviewer process, using the TERM/KILL cleanup described below.
 
 ### Command execution semantics
@@ -271,6 +280,8 @@ unsupported format flag is reported as a list failure.
 Zellij's exit-1 empty-list diagnostic maps to `not running`; other failures remain
 errors. Status means the exact name is listed, including exited sessions that Zellij
 can resurrect; the CLI's `running` label does not guarantee a live process.
+Inventory capture has a combined 1 MiB stdout/stderr budget. Overflow fails with a fixed diagnostic, without printing captured output; timeout and overflow retire the owned inventory process group. Interactive commands retain the terminal.
+
 These output contracts are defined in [Zellij 0.45.1's session listing](https://github.com/zellij-org/zellij/blob/v0.45.1/zellij-utils/src/sessions.rs).
 
 Both worktree and epic locks refuse symlinked components in the two directory levels above the lock file (`.beads/locks` for epic runs). Before writing PID metadata, the opened inode must be a single-link regular file owned by the current user. Hardlinked lock entries are refused without changing the aliased file. The refusal message names the reason; if a stale lock file was left by another user (for example a root or container run) or was hardlinked by backup/sync tooling, remove that file (no beadsflow run may be active) and retry. Contention and acquisition/PID-write failures close the handle and release any acquired lock, allowing a later retry.
@@ -286,7 +297,7 @@ directory namespace or prevent external changes after admission.
 
 Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
 
-Runner profile commands on macOS/Linux execute in an owned process group. On timeout or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. This applies to runner profiles and the standalone `beadsflow review` helper.
+Runner profile commands on macOS/Linux execute in an owned process group. On timeout, overflow or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and waits for the direct command. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. On ordinary completion (including a nonzero exit), remaining group members also receive TERM/KILL before the result returns or execution locks are released. The leader stays unreaped until the last signal, preventing process-group ID reuse, and its real exit code/output are preserved. Commands must not rely on background group members continuing after the leader exits. This applies to runner profiles and the standalone `beadsflow review` helper.
 
 Runner profiles, standalone reviewer commands and internal Beads commands have a hard 8 MiB combined stdout/stderr
 capture limit per command. Git context/signature commands have a separate 64 MiB cap
@@ -373,6 +384,14 @@ Child readiness uses the refreshed child status as well as its dependencies: onl
 (and `in_progress` when `run.resume_in_progress` is enabled) can run or close. Stale epic
 summaries cannot make a blocked, closed or non-resumable child eligible; selection continues
 to the next eligible child.
+
+Only dependents whose explicit `dependency_type` is exactly `parent-child`
+belong to the epic: other edges (including `blocks` and `discovered-from`) are
+neither selected nor counted toward completion. The adapter retains reverse edge
+types and refuses missing, null, blank or non-text dependent relationships rather
+than guessing ownership. This stricter requirement applies to reverse dependents;
+legacy missing forward dependency types remain blocking as documented above.
+External blocking dependencies still gate an actual child's readiness.
 
 Before reporting an epic complete, the runner refreshes every child in an all-closed epic summary. Reopened children return to selection using the same per-iteration reads; a failed read stops completion. An empty epic is complete.
 

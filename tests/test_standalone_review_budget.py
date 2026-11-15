@@ -86,3 +86,71 @@ def test_reviewer_own_exit_code_is_not_reported_as_harness_limit(code: int) -> N
     assert "synthetic reviewer failure" in message
     assert "timed out" not in message
     assert "output exceeded" not in message
+
+
+@pytest.mark.parametrize("section", ["title", "description", "acceptance_criteria", "status", "stat", "combined"])
+def test_complete_prompt_overflow_refuses_launch_and_approval(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], section: str
+) -> None:
+    from dataclasses import replace
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    issue = Issue("child", "Synthetic", IssueStatus.OPEN, 0, IssueType.TASK, now, now, [], [], [])
+    large = "雪" * 24000
+    issue = replace(
+        issue,
+        title=large if section == "title" else issue.title,
+        description=large if section == "description" else "x" * 24000 if section == "combined" else "",
+        acceptance_criteria=large
+        if section == "acceptance_criteria"
+        else "y" * 24000
+        if section == "combined"
+        else "",
+    )
+    monkeypatch.setattr(review.BeadsCli, "get_issue", lambda self, issue_id: issue)
+    monkeypatch.setattr(
+        review,
+        "_collect_git_context",
+        lambda limit: (
+            large if section == "status" else "status",
+            large if section == "stat" else "z" * 24000 if section == "combined" else "stat",
+            "patch",
+        ),
+    )
+
+    def forbidden(**kwargs: object) -> None:
+        pytest.fail("oversized complete context must not launch a reviewer")
+
+    monkeypatch.setattr(review, "run_command", forbidden)
+    assert cli.main(["review", "--issue-id", "child", "--epic-id", "epic", "--cli", "synthetic-review"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "prompt exceeded" in captured.err
+    assert "雪" not in captured.err
+
+
+@pytest.mark.parametrize("size", [65535, 65536, 65537])
+def test_prompt_budget_counts_utf8_bytes_at_boundary(monkeypatch: pytest.MonkeyPatch, size: int) -> None:
+    from beadsflow.infra.run_command import CommandResult
+
+    prompt = "雪" * (size // 3) + "x" * (size % 3)
+    calls: list[str] = []
+
+    def run(*, argv: list[str], **kwargs: object) -> CommandResult:
+        calls.append(argv[-1])
+        return CommandResult(argv, 0, "LGTM", "")
+
+    monkeypatch.setattr(review, "run_command", run)
+    if size <= 65536:
+        assert review._run_reviewer_command(cli_command="synthetic", prompt_arg="-p", prompt=prompt) == "LGTM"
+        assert calls == [prompt]
+    else:
+        with pytest.raises(CommandError, match="prompt exceeded"):
+            review._run_reviewer_command(cli_command="synthetic", prompt_arg="-p", prompt=prompt)
+        assert not calls
+
+
+@pytest.mark.parametrize("prompt", ["synthetic\0context", "synthetic\ud800context"])
+def test_unencodable_argv_context_is_a_controlled_refusal(prompt: str) -> None:
+    with pytest.raises(CommandError, match="review context refused"):
+        review._run_reviewer_command(cli_command="never-run", prompt_arg="-p", prompt=prompt)

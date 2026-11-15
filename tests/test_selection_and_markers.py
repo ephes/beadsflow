@@ -84,6 +84,7 @@ def test_select_next_child_priority_then_oldest_then_id() -> None:
             status=IssueStatus.OPEN,
             priority=2,
             created_at=_dt("2025-01-02T00:00:00"),
+            dependency_type="parent-child",
         ),
         IssueSummary(
             id="b",
@@ -91,6 +92,7 @@ def test_select_next_child_priority_then_oldest_then_id() -> None:
             status=IssueStatus.OPEN,
             priority=1,
             created_at=_dt("2025-01-03T00:00:00"),
+            dependency_type="parent-child",
         ),
         IssueSummary(
             id="c",
@@ -98,6 +100,7 @@ def test_select_next_child_priority_then_oldest_then_id() -> None:
             status=IssueStatus.OPEN,
             priority=1,
             created_at=_dt("2025-01-01T00:00:00"),
+            dependency_type="parent-child",
         ),
     ]
 
@@ -119,6 +122,7 @@ def test_select_next_child_skips_not_ready() -> None:
             status=IssueStatus.OPEN,
             priority=1,
             created_at=_dt("2025-01-01T00:00:00"),
+            dependency_type="parent-child",
         ),
         IssueSummary(
             id="b",
@@ -126,6 +130,7 @@ def test_select_next_child_skips_not_ready() -> None:
             status=IssueStatus.OPEN,
             priority=1,
             created_at=_dt("2025-01-02T00:00:00"),
+            dependency_type="parent-child",
         ),
     ]
 

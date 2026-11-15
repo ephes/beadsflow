@@ -133,16 +133,44 @@ time.sleep(20)
 
 
 def test_exited_leader_permission_error_is_harmless(monkeypatch: pytest.MonkeyPatch) -> None:
-    from beadsflow.infra.run_command import _signal_group
+    from beadsflow.infra.run_command import _signal_group, _wait_for_exit
 
-    process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True, text=True)
-    process.wait()
+    process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    _wait_for_exit(process, 2)
 
     def denied(*args: object) -> None:
         raise PermissionError("zombie group")
 
     monkeypatch.setattr(os, "killpg", denied)
+    try:
+        _signal_group(process, signal.SIGKILL)
+        assert process.returncode is None
+    finally:
+        assert process.wait() == 0
+
+
+def test_reaped_leader_group_is_never_signalled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from beadsflow.infra.run_command import _signal_group
+
+    process = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    process.wait()
+
+    def forbidden(*args: object) -> None:
+        pytest.fail("a reaped leader no longer pins the process-group identity")
+
+    monkeypatch.setattr(os, "killpg", forbidden)
     _signal_group(process, signal.SIGKILL)
+
+
+def test_exit_observation_preserves_unreaped_leader_outcome() -> None:
+    from beadsflow.infra.run_command import _wait_for_exit
+
+    process = subprocess.Popen([sys.executable, "-c", "import sys; sys.exit(17)"], start_new_session=True)
+    try:
+        _wait_for_exit(process, 2)
+        assert process.returncode is None
+    finally:
+        assert process.wait() == 17
 
 
 @pytest.mark.parametrize("preserve_output", [False, True])
@@ -203,3 +231,59 @@ def test_combined_output_budget_and_exact_boundary() -> None:
         if expected == 0:
             assert result.stdout == "a" * 4096
             assert result.stderr == "b" * 4096
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_completed_leader_retires_closed_pipe_descendant(tmp_path: Path, exit_code: int) -> None:
+    marker, pid_file = tmp_path / "late-write", tmp_path / "pid"
+    parent = """
+import subprocess, sys
+from pathlib import Path
+child = subprocess.Popen(
+    [sys.executable, '-c', sys.argv[3], sys.argv[1]],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+Path(sys.argv[2]).write_text(str(child.pid))
+print('leader output', flush=True)
+sys.exit(int(sys.argv[4]))
+"""
+    try:
+        from beadsflow.infra.locking import EpicLock
+
+        lock_path = tmp_path / "execution.lock"
+        with EpicLock(lock_path):
+            result = run_command(
+                argv=[sys.executable, "-c", parent, str(marker), str(pid_file), CHILD, str(exit_code)],
+                timeout_seconds=5,
+                env={},
+            )
+        assert result.returncode == exit_code
+        assert result.limit is None
+        assert result.stdout == "leader output\n"
+        with EpicLock(lock_path):
+            assert run_command(argv=[sys.executable, "-c", "pass"], timeout_seconds=2, env={}).returncode == 0
+        time.sleep(2.2)
+        assert not marker.exists()
+    finally:
+        if pid_file.exists():
+            try:
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_leader_can_close_pipes_before_finishing(tmp_path: Path) -> None:
+    marker = tmp_path / "completed"
+    result = run_command(
+        argv=[
+            sys.executable,
+            "-c",
+            "import os, time, pathlib, sys; os.close(1); os.close(2); "
+            "time.sleep(.1); pathlib.Path(sys.argv[1]).touch()",
+            str(marker),
+        ],
+        timeout_seconds=2,
+        env={},
+    )
+    assert result.returncode == 0
+    assert marker.exists()

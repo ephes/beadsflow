@@ -46,7 +46,16 @@ class Beads:
             created_at=NOW,
             updated_at=NOW,
             dependencies=[],
-            dependents=[IssueSummary("child", "Child", IssueStatus.CLOSED if closed else IssueStatus.OPEN, 1, NOW)]
+            dependents=[
+                IssueSummary(
+                    "child",
+                    "Child",
+                    IssueStatus.CLOSED if closed else IssueStatus.OPEN,
+                    1,
+                    NOW,
+                    dependency_type="parent-child",
+                )
+            ]
             if issue_id == "epic"
             else [],
             comments=self.comments if issue_id == "child" else [],

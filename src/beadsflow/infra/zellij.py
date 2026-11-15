@@ -5,8 +5,11 @@ import subprocess
 from dataclasses import dataclass
 from typing import Literal
 
+from beadsflow.infra.run_command import run_command
+
 ZellijErrorKind = Literal["missing", "failed"]
 CONTROL_TIMEOUT_SECONDS = 10
+INVENTORY_MAX_OUTPUT_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,21 +68,24 @@ class Zellij:
     def has_session(self, *, session_name: str) -> bool:
         self._ensure_available()
         try:
-            completed = subprocess.run(
-                [self.executable, "list-sessions", "--no-formatting", "--short"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=CONTROL_TIMEOUT_SECONDS,
+            completed = run_command(
+                argv=[self.executable, "list-sessions", "--no-formatting", "--short"],
+                timeout_seconds=CONTROL_TIMEOUT_SECONDS,
+                max_output_bytes=INVENTORY_MAX_OUTPUT_BYTES,
+                env={},
             )
-        except subprocess.TimeoutExpired as exc:
-            raise ZellijError(
-                kind="failed", message=f"zellij list-sessions timed out after {CONTROL_TIMEOUT_SECONDS} seconds"
-            ) from exc
         except OSError as exc:
             raise ZellijError(
                 kind="failed", message=f"Cannot execute zellij list-sessions ({type(exc).__name__})"
             ) from exc
+        if completed.limit == "timeout":
+            raise ZellijError(
+                kind="failed", message=f"zellij list-sessions timed out after {CONTROL_TIMEOUT_SECONDS} seconds"
+            )
+        if completed.limit == "output":
+            raise ZellijError(
+                kind="failed", message=f"zellij list-sessions output exceeded {INVENTORY_MAX_OUTPUT_BYTES} bytes"
+            )
         if completed.returncode != 0:
             if (
                 completed.returncode == 1

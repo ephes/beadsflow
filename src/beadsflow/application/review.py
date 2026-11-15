@@ -16,6 +16,7 @@ from beadsflow.infra.run_command import DEFAULT_MAX_OUTPUT_BYTES, run_command
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 3600
 DEFAULT_DIFF_MAX_BYTES = 8000
 DEFAULT_COMMENT_MAX_BYTES = 4000
+MAX_PROMPT_BYTES = 64 * 1024
 TRUNCATED_NOTICE = "\n\n[truncated]"
 logger = logging.getLogger("beadsflow")
 
@@ -158,9 +159,26 @@ def _build_prompt(
     ).strip()
 
 
+def _admit_prompt(prompt: str) -> None:
+    try:
+        size = len(prompt.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise CommandError("Reviewer prompt is not valid UTF-8; review context refused") from exc
+    if size > MAX_PROMPT_BYTES:
+        raise CommandError(
+            f"Reviewer prompt exceeded {MAX_PROMPT_BYTES} UTF-8 bytes; "
+            "reduce issue or Git context before retrying (acceptance criteria were not omitted)"
+        )
+    if "\0" in prompt:
+        raise CommandError("Reviewer prompt contains NUL; review context refused")
+
+
 def _run_reviewer_command(
     *, cli_command: str, prompt_arg: str, prompt: str, timeout_seconds: int = DEFAULT_REVIEW_TIMEOUT_SECONDS
 ) -> str:
+    # The configured reviewer interface passes one argv operand. Admit every
+    # section together, including requirements/status/stat that are never truncated.
+    _admit_prompt(prompt)
     argv = shlex.split(cli_command)
     if not argv:
         raise CommandError("Reviewer command is empty")

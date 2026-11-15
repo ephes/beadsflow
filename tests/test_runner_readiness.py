@@ -46,8 +46,8 @@ def test_all_dependencies_gate_execution(
         issue_type=IssueType.EPIC,
         dependencies=[],
         dependents=[
-            IssueSummary("child-1", "Child", child_status, 1, now),
-            IssueSummary("child-2", "Sibling", IssueStatus.CLOSED, 2, now),
+            IssueSummary("child-1", "Child", child_status, 1, now, dependency_type="parent-child"),
+            IssueSummary("child-2", "Sibling", IssueStatus.CLOSED, 2, now, dependency_type="parent-child"),
         ],
     )
 
@@ -83,7 +83,10 @@ def test_refreshed_child_status_gates_dispatch(
         first,
         id="epic",
         issue_type=IssueType.EPIC,
-        dependents=[IssueSummary(c.id, c.title, IssueStatus.OPEN, i, now) for i, c in enumerate((first, second))],
+        dependents=[
+            IssueSummary(c.id, c.title, IssueStatus.OPEN, i, now, dependency_type="parent-child")
+            for i, c in enumerate((first, second))
+        ],
     )
 
     class FakeBeads:
@@ -122,7 +125,7 @@ def test_completion_refreshes_closed_summaries_once(
         child,
         id="epic",
         issue_type=IssueType.EPIC,
-        dependents=[IssueSummary(child.id, "Stale child", IssueStatus.CLOSED, 1, now)],
+        dependents=[IssueSummary(child.id, "Stale child", IssueStatus.CLOSED, 1, now, dependency_type="parent-child")],
     )
     reads: list[str] = []
 
@@ -168,7 +171,7 @@ def test_empty_epic_completes_but_child_read_failure_stops(
         now,
         now,
         [],
-        [] if empty else [IssueSummary("child", "Child", IssueStatus.CLOSED, 1, now)],
+        [] if empty else [IssueSummary("child", "Child", IssueStatus.CLOSED, 1, now, dependency_type="parent-child")],
         [],
     )
 

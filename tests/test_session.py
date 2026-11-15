@@ -14,6 +14,7 @@ class _Completed:
     returncode: int
     stdout: str = ""
     stderr: str = ""
+    limit: str | None = None
 
 
 def test_session_start_missing_zellij_prints_manual_command(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,6 +44,7 @@ def test_session_status_detects_session(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(zellij_mod.shutil, "which", which)
     monkeypatch.setattr(zellij_mod.subprocess, "run", run)
+    monkeypatch.setattr(zellij_mod, "run_command", lambda *, argv, **kwargs: run(argv, **kwargs))
 
     assert handle_session(SessionStatusRequest(name="beadsflow-3cx")) == 0
     assert handle_session(SessionStatusRequest(name="nope")) == 1
@@ -62,6 +64,7 @@ def test_session_start_invokes_zellij(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(zellij_mod.shutil, "which", which)
     monkeypatch.setattr(zellij_mod.subprocess, "run", run)
+    monkeypatch.setattr(zellij_mod, "run_command", lambda *, argv, **kwargs: run(argv, **kwargs))
 
     request = SessionStartRequest(
         name="sess",
@@ -116,14 +119,17 @@ def test_control_failure_returns_nonzero_without_raw_output(
 
     def run(argv: list[str], **kwargs: object) -> _Completed:
         calls.append(argv)
-        assert kwargs.get("timeout") == 10
+        assert kwargs.get("timeout", kwargs.get("timeout_seconds")) == 10
         if failure == "timeout":
+            if operation == "status":
+                return _Completed(124, limit="timeout")
             raise subprocess.TimeoutExpired(
                 argv, 10, output="synthetic-private-output", stderr="synthetic-private-error"
             )
         raise OSError("synthetic-private-error")
 
     monkeypatch.setattr(zellij_mod.subprocess, "run", run)
+    monkeypatch.setattr(zellij_mod, "run_command", lambda *, argv, **kwargs: run(argv, **kwargs))
     assert cli_mod.main(["session", operation, "synthetic-session"]) == 1
     assert calls == [
         ["zellij", "list-sessions", "--no-formatting", "--short"]
@@ -150,6 +156,7 @@ def test_interactive_sessions_have_no_control_timeout(monkeypatch: pytest.Monkey
         return _Completed(0)
 
     monkeypatch.setattr(zellij_mod.subprocess, "run", run)
+    monkeypatch.setattr(zellij_mod, "run_command", lambda *, argv, **kwargs: run(argv, **kwargs))
     args = ["session", operation, "synthetic-session"]
     if operation == "start":
         args.extend(["--epic", "epic-1"])
@@ -168,6 +175,7 @@ def test_control_success_and_command_failure(
     monkeypatch.setattr(
         zellij_mod.subprocess, "run", lambda *args, **kwargs: _Completed(returncode, "synthetic-session\n")
     )
+    monkeypatch.setattr(zellij_mod, "run_command", lambda **kwargs: _Completed(returncode, "synthetic-session\n"))
     assert cli_mod.main(["session", operation, "synthetic-session"]) == returncode
     output = capsys.readouterr()
     if returncode:
@@ -193,12 +201,13 @@ def test_status_uses_exact_unformatted_names(monkeypatch: pytest.MonkeyPatch, na
     monkeypatch.setattr(zellij_mod.shutil, "which", lambda _: "/synthetic/zellij")
 
     def run(argv: list[str], **kwargs: object) -> _Completed:
-        assert kwargs == {"check": False, "capture_output": True, "text": True, "timeout": 10}
+        assert kwargs == {"timeout_seconds": 10, "max_output_bytes": 1024 * 1024, "env": {}}
         # A synthetic Zellij responding according to its public format flags.
         output = name if argv == ["zellij", "list-sessions", "--no-formatting", "--short"] else display
         return _Completed(0, output + "\n")
 
     monkeypatch.setattr(zellij_mod.subprocess, "run", run)
+    monkeypatch.setattr(zellij_mod, "run_command", lambda *, argv, **kwargs: run(argv, **kwargs))
     assert handle_session(SessionStatusRequest(name=name)) == 0
 
 
@@ -207,7 +216,7 @@ def test_status_never_accepts_prefixes(monkeypatch: pytest.MonkeyPatch, output: 
     import beadsflow.infra.zellij as zellij_mod
 
     monkeypatch.setattr(zellij_mod.shutil, "which", lambda _: "/synthetic/zellij")
-    monkeypatch.setattr(zellij_mod.subprocess, "run", lambda *args, **kwargs: _Completed(0, output))
+    monkeypatch.setattr(zellij_mod, "run_command", lambda **kwargs: _Completed(0, output))
     assert handle_session(SessionStatusRequest(name="sess")) == 1
 
 
@@ -231,7 +240,7 @@ def test_cli_status_distinguishes_empty_list_from_failure(
     import beadsflow.infra.zellij as zellij_mod
 
     monkeypatch.setattr(zellij_mod.shutil, "which", lambda _: "/synthetic/zellij")
-    monkeypatch.setattr(zellij_mod.subprocess, "run", lambda *args, **kwargs: _Completed(returncode, stdout, stderr))
+    monkeypatch.setattr(zellij_mod, "run_command", lambda **kwargs: _Completed(returncode, stdout, stderr))
     assert cli_mod.main(["session", "status", "sess"]) == 1
     result = capsys.readouterr()
     assert result.out == ("not running\n" if empty else "")
@@ -259,6 +268,7 @@ def test_interactive_failure_has_safe_cli_envelope(
         return _Completed(7)
 
     monkeypatch.setattr(zellij_mod.subprocess, "run", run)
+    monkeypatch.setattr(zellij_mod, "run_command", lambda *, argv, **kwargs: run(argv, **kwargs))
     args = ["session", operation, "sess"]
     expected = ["zellij", "attach", "sess"]
     if operation == "start":
