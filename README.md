@@ -32,7 +32,7 @@ just docs
 
 ## Automated quality checks
 
-The `Quality` GitHub Actions workflow runs on pushes and pull requests with read-only repository permissions. It installs Python 3.11 and uv 0.13.0, syncs the committed lock with `uv sync --frozen`, then invokes installed tools directly. Sync or check failures fail the job; CI does not use the Justfile fallback. Reproduce it locally:
+The `Quality` GitHub Actions workflow runs only when started manually (`workflow_dispatch`), with read-only repository permissions. It installs Python 3.11 and uv 0.13.0, syncs the committed lock with `uv sync --frozen`, then invokes installed tools directly. Sync or check failures fail the job; CI does not use the Justfile fallback. Reproduce it locally:
 
 ```bash
 uv sync --frozen --python 3.11
