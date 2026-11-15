@@ -41,6 +41,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Refuse standalone reviewer prompts above 64 KiB of complete UTF-8 context before launch, including issue requirements and Git status/stat; invalid UTF-8/NUL contexts also fail without a comment or approval.
+- Preserve dependent relationship types and admit only explicit parent-child work into epic selection/completion. Ambiguous reverse edge types fail closed; ordinary external blockers still gate owned children.
+
 - Retire residual owned process-group members after successful or failed leader exit, before returning or releasing execution locks; retain the unreaped leader through cleanup to prevent group ID reuse and preserve its real outcome.
 - Bound Zellij session inventory to 1 MiB combined stdout/stderr with safe overflow diagnostics and process-group cleanup; preserve exact session-name and no-session handling.
 

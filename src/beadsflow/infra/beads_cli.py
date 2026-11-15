@@ -46,6 +46,13 @@ def _text(value: object) -> str:
     return value
 
 
+def _relationship(value: object) -> str:
+    value = _text(value)
+    if not value.strip():
+        raise ValueError("expected explicit relationship")
+    return value
+
+
 def _identity(value: object) -> str:
     value = _text(value)
     # Match the epic-lock policy before backend IDs reach argv or profiles.
@@ -200,6 +207,8 @@ class BeadsCli:
                 # Beads omits priority for default P0; treat missing as 0.
                 priority=_integer(child.get("priority", 0)),
                 created_at=_parse_datetime(child["created_at"]),
+                # Missing/ambiguous reverse edges cannot establish ownership.
+                dependency_type=_relationship(child["dependency_type"]),
             )
             for child in _records(raw, "dependents")
         ]

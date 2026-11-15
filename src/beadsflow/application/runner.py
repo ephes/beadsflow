@@ -115,6 +115,11 @@ class EpicRunLoop:
         if epic.issue_type is not IssueType.EPIC:
             raise ConfigError(f"{self.epic_id} is not an epic")
 
+        # Reverse dependents also include blockers and associations. Only an
+        # explicit parent-child edge belongs to this epic's automation lifetime.
+        epic = replace(
+            epic, dependents=[child for child in epic.dependents if child.dependency_type == "parent-child"]
+        )
         cache: dict[str, Issue] = {}
         epic = self._refresh_completion_candidates(epic, cache=cache)
 

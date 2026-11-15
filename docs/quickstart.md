@@ -109,6 +109,15 @@ comment_mode = "stdout"
 `--cli` is parsed with `shlex.split(...)`, so you can pass a full command (e.g., `--cli "claude --model opus"`).
 Use `--prompt-arg` to match the flag your CLI uses to receive the prompt (default: `-p`).
 
+The configured reviewer interface passes the prompt as one command argument. The
+**complete prompt** must fit 64 KiB of UTF-8, including title, description,
+acceptance criteria, comment headers, Git status/stat and formatting. This cap is
+separate from the patch/comment truncation settings. An oversized, unencodable or
+NUL-containing prompt is refused before reviewer launch, with a nonzero exit and
+no review comment/approval. Requirements are never silently shortened to fit.
+Reduce the issue or Git context and retry; this interface does not configure a
+stdin/file prompt transport.
+
 The standalone helper limits its reviewer command to 3600 seconds by default, matching the runner default. Set `beadsflow review --timeout-seconds 120` to override (positive integer). Configure this explicitly alongside `run.command_timeout_seconds` when using a different runner deadline; allow the outer runner enough time for context collection and cleanup. A timeout exits nonzero, writes a diagnostic to stderr, and prints no review comment or approval, even if the command emitted partial output. The shared command runner terminates the owned process group and waits for the direct reviewer process, using the TERM/KILL cleanup described below.
 
 ### Command execution semantics
@@ -375,6 +384,14 @@ Child readiness uses the refreshed child status as well as its dependencies: onl
 (and `in_progress` when `run.resume_in_progress` is enabled) can run or close. Stale epic
 summaries cannot make a blocked, closed or non-resumable child eligible; selection continues
 to the next eligible child.
+
+Only dependents whose explicit `dependency_type` is exactly `parent-child`
+belong to the epic: other edges (including `blocks` and `discovered-from`) are
+neither selected nor counted toward completion. The adapter retains reverse edge
+types and refuses missing, null, blank or non-text dependent relationships rather
+than guessing ownership. This stricter requirement applies to reverse dependents;
+legacy missing forward dependency types remain blocking as documented above.
+External blocking dependencies still gate an actual child's readiness.
 
 Before reporting an epic complete, the runner refreshes every child in an all-closed epic summary. Reopened children return to selection using the same per-iteration reads; a failed read stops completion. An empty epic is complete.
 
