@@ -47,6 +47,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Bound command cleanup and direct-child reaping to a finite allowance on normal and failure paths. Report incomplete cleanup instead of success, preserving timeout/output-limit codes 124/125 with a diagnostic.
+
 - Include complete admitted untracked UTF-8 source contents in built-in review context using shared fingerprint path/generation checks and review exclusions. Refuse unsupported or oversized sources before reviewer launch. Preserve patch trailing whitespace and require the complete tracked/untracked patch to fit the positive patch budget; clipped evidence can no longer produce helper approval or runner approval evidence.
 
 - Recheck child readiness and current epic membership after close-signature collection; defer changed intent without closing or superseding approval. Limit out-of-sync import/replay to reads; uncertain comment/close writes require explicit state readback before retry.

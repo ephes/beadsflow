@@ -14,9 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from beadsflow.application.errors import ConfigError
+from beadsflow.application.errors import CommandError, ConfigError
 
 DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+CLEANUP_SECONDS = 1.5
+REAP_SECONDS = 0.5
 
 
 class _OutputLimitExceeded(Exception):
@@ -89,25 +91,23 @@ def run_command(
     limit: Literal["timeout", "output"] | None = None
     try:
         _drain(process, output, timeout_seconds, max_output_bytes)
-        # Keep the exited leader unreaped until the last group signal. Its PID
-        # pins the group identity, even if every descendant has already exited.
-        _signal_group(process, signal.SIGTERM)
-        _signal_group(process, signal.SIGKILL)
-        code = process.wait()
     except _OutputLimitExceeded:
-        _stop_group(process, output, max_output_bytes)
+        cleanup_notice = _stop_group(process, output, max_output_bytes)
         code = 125
         limit = "output"
-        notice = f"\nCommand output exceeded {max_output_bytes} bytes; capture truncated."
+        notice = f"\nCommand output exceeded {max_output_bytes} bytes; capture truncated." + cleanup_notice
     except subprocess.TimeoutExpired:
-        _stop_group(process, output, max_output_bytes)
+        cleanup_notice = _stop_group(process, output, max_output_bytes)
         code = 124
         limit = "timeout"
         if not output[1]:
             notice = f"Timed out after {timeout_seconds} seconds."
+        notice += cleanup_notice
     except BaseException:
         _stop_group(process, output, max_output_bytes)
         raise
+    else:
+        code = _finish_group(process)
     return CommandResult(
         argv=argv,
         returncode=code,
@@ -192,16 +192,43 @@ def _signal_group(process: subprocess.Popen[bytes] | subprocess.Popen[str], sig:
             raise PermissionError("Cannot signal owned process group") from None
 
 
-def _stop_group(process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int) -> None:
+def _finish_group(process: subprocess.Popen[bytes]) -> int:
+    # Keep the exited leader unreaped until the last group signal. Its PID
+    # pins the group identity, even if every descendant has already exited.
+    _signal_group(process, signal.SIGTERM)
+    _signal_group(process, signal.SIGKILL)
+    try:
+        cleanup_notice = _reap(process, time.monotonic() + REAP_SECONDS)
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+    if cleanup_notice:
+        raise CommandError(cleanup_notice.strip())
+    assert process.returncode is not None
+    return process.returncode
+
+
+def _reap(process: subprocess.Popen[bytes], deadline: float) -> str:
+    try:
+        process.wait(timeout=max(0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        return "\nCommand cleanup incomplete: direct child could not be reaped within cleanup allowance."
+    return ""
+
+
+def _stop_group(process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int) -> str:
+    deadline = time.monotonic() + CLEANUP_SECONDS
     # Cleanup keeps draining under the same cap, never communicating unbounded output.
     _signal_group(process, signal.SIGTERM)
     try:
         try:
-            _drain(process, output, 0.5, limit, fail_on_overflow=False)
+            _drain(process, output, min(0.5, max(0, deadline - time.monotonic())), limit, fail_on_overflow=False)
         except subprocess.TimeoutExpired:
             _signal_group(process, signal.SIGKILL)
             try:
-                _drain(process, output, 0.5, limit, fail_on_overflow=False)
+                _drain(process, output, min(0.5, max(0, deadline - time.monotonic())), limit, fail_on_overflow=False)
             except subprocess.TimeoutExpired:
                 # Escaped descendants may retain pipe handles; do not await their EOF.
                 pass
@@ -209,8 +236,9 @@ def _stop_group(process: subprocess.Popen[bytes], output: tuple[bytearray, bytea
         try:
             _signal_group(process, signal.SIGKILL)
         finally:
-            process.wait()
+            cleanup_notice = _reap(process, deadline)
             if process.stdout is not None:
                 process.stdout.close()
             if process.stderr is not None:
                 process.stderr.close()
+    return cleanup_notice

@@ -13,6 +13,14 @@ the replacement. Keep lock names and directories stable during a run; this
 admission check does not lock the filesystem namespace. See the
 [locking notes](docs/quickstart.md) for concurrency and filesystem assumptions.
 
+Commands retire their owned process group before returning. Cleanup adds at most
+1.5 seconds after timeout, output overflow or interruption (0.5 seconds after
+ordinary completion), including a finite direct-child reap allowance. If the child
+cannot be reaped, ordinary completion raises a command error instead of reporting
+success; timeout/output-limit results retain codes 124/125 and include a cleanup
+uncertainty diagnostic. An escaped descendant is outside the cleanup guarantee.
+See the [command contracts](docs/quickstart.md) for details.
+
 ## Dev quickstart
 
 ```bash

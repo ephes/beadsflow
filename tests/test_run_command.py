@@ -287,3 +287,62 @@ def test_leader_can_close_pipes_before_finishing(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert marker.exists()
+
+
+@pytest.mark.parametrize("outcome", ["completed", "timeout", "output"])
+def test_unreapable_child_has_finite_cleanup(outcome: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    from io import BytesIO
+
+    import beadsflow.infra.run_command as module
+    from beadsflow.application.errors import CommandError
+
+    clock = [0.0]
+    waits: list[float] = []
+
+    class UnreapableProcess:
+        args = ["synthetic-command"]
+        returncode = None
+        stdout = BytesIO()
+        stderr = BytesIO()
+
+        def wait(self, timeout: float | None = None) -> int:
+            assert timeout is not None, "cleanup must never wait without a deadline"
+            assert timeout >= 0
+            waits.append(timeout)
+            clock[0] += timeout
+            raise subprocess.TimeoutExpired(self.args, timeout)
+
+    process = UnreapableProcess()
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module, "_signal_group", lambda *args: None)
+    first_drain = True
+
+    def drain(*args: object, **kwargs: object) -> None:
+        nonlocal first_drain
+        if first_drain:
+            first_drain = False
+            if outcome == "completed":
+                return
+            if outcome == "output":
+                raise module._OutputLimitExceeded
+            raise subprocess.TimeoutExpired(process.args, 10)
+        # Consume the allotted drain interval, simulating a child holding pipes open.
+        allowance = args[2]
+        assert isinstance(allowance, (int, float))
+        clock[0] += allowance
+        raise subprocess.TimeoutExpired(process.args, allowance)
+
+    monkeypatch.setattr(module, "_drain", drain)
+    if outcome == "completed":
+        with pytest.raises(CommandError, match="cleanup incomplete"):
+            run_command(argv=process.args, timeout_seconds=10, env={})
+    else:
+        result = run_command(argv=process.args, timeout_seconds=10, env={})
+        assert result.returncode == (124 if outcome == "timeout" else 125)
+        assert result.limit == outcome
+        assert "cleanup incomplete" in result.stderr.lower()
+    assert waits
+    assert clock[0] <= 1.5
+    assert process.stdout.closed
+    assert process.stderr.closed
