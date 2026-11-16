@@ -3,6 +3,7 @@ import os
 import socket
 import stat
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,56 @@ def test_clean_commit_changes_signature(loop: EpicRunLoop) -> None:
     (root / "tracked").write_text("new")
     git(root, "add", "tracked")
     git(root, "commit", "-m", "Change")
+    assert loop._git_signature() != before
+    assert loop._git_signature() == loop._git_signature()
+
+
+@pytest.mark.parametrize("kind", ["tracked", "staged", "untracked"])
+def test_dirty_submodule_refuses_all_byte_versions(
+    loop: EpicRunLoop, add_submodule: Callable[[Path], Path], kind: str
+) -> None:
+    root = loop.repo_paths.worktree_root
+    module = add_submodule(root)
+    name = "untracked\nentry" if kind == "untracked" else "tracked"
+    for text in ["edit one\n", "edit two\n"]:
+        (module / name).write_text(text)
+        if kind == "staged":
+            git(module, "add", name)
+        with pytest.raises(CommandError, match="Dirty submodule"):
+            loop._git_signature(exclude_beads=True)
+
+
+def test_clean_submodule_commit_updates_remain_reviewable(
+    loop: EpicRunLoop, add_submodule: Callable[[Path], Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from beadsflow.application.review import _collect_git_context
+
+    root = loop.repo_paths.worktree_root
+    module = add_submodule(root)
+    monkeypatch.chdir(root)
+    previous = loop._git_signature()
+    for text in ["commit one\n", "commit two\n"]:
+        (module / "tracked").write_text(text)
+        git(module, "add", "tracked")
+        git(module, "commit", "-m", "Synthetic submodule change")
+        current = loop._git_signature()
+        assert current != previous
+        assert current == loop._git_signature()
+        assert "Subproject commit" in _collect_git_context(8000)[2]
+        previous = current
+    git(root, "add", module.name)
+    assert loop._git_signature() != previous
+    assert "Staged:" in _collect_git_context(8000)[2]
+
+
+def test_rename_source_name_cannot_imitate_submodule_status(loop: EpicRunLoop) -> None:
+    root = loop.repo_paths.worktree_root
+    path = root / "1 M. S.M. synthetic\nentry"
+    path.write_text("synthetic source\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Synthetic rename baseline")
+    before = loop._git_signature()
+    git(root, "mv", path.name, "renamed")
     assert loop._git_signature() != before
     assert loop._git_signature() == loop._git_signature()
 

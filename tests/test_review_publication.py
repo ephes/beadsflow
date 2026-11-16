@@ -5,6 +5,7 @@ import logging
 import stat
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -126,6 +127,50 @@ def test_unchanged_review_approves_and_closes(review_loop: EpicRunLoop, script: 
     assert [c.text for c in loop.beads.comments[:2]] == ["Ready for review:", "LGTM\n"]  # type: ignore[attr-defined]
     assert loop.beads.comments[-1].text.startswith("LGTM\n\nBeadsflow reviewed content v2: ")  # type: ignore[attr-defined]
     assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_clean_submodule_commit_update_can_approve_and_close(
+    review_loop: EpicRunLoop, add_submodule: Callable[[Path], Path], staged: bool
+) -> None:
+    root = review_loop.repo_paths.worktree_root
+    module = add_submodule(root)
+    (module / "tracked").write_text("committed nested change")
+    git(module, "add", "tracked")
+    git(module, "commit", "-m", "Synthetic nested change")
+    if staged:
+        git(root, "add", module.name)
+    loop = with_script(review_loop, "print('LGTM')")
+    assert loop.run(once=False, dry_run=False, max_iterations=3) == 0
+    assert loop.beads.closed == ["child"]  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("kind", ["tracked", "untracked"])
+@pytest.mark.parametrize("boundary", ["before_review", "during_review", "resumed_close"])
+def test_dirty_submodule_cannot_approve_or_close(
+    review_loop: EpicRunLoop, add_submodule: Callable[[Path], Path], kind: str, boundary: str
+) -> None:
+    root = review_loop.repo_paths.worktree_root
+    module = add_submodule(root)
+    name = "tracked" if kind == "tracked" else "untracked"
+    relative = (module / name).relative_to(root).as_posix()
+    script = "from pathlib import Path; Path('ignored').write_text('launched'); "
+    if boundary == "during_review":
+        script += f"Path({relative!r}).write_text('edit one'); "
+    loop = with_script(review_loop, script + "print('LGTM')")
+    if boundary == "resumed_close":
+        assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+        assert loop.beads.comments[-1].text.startswith("LGTM\n\nBeadsflow reviewed content v2:")  # type: ignore[attr-defined]
+        (root / "ignored").unlink()
+    original_comments = list(loop.beads.comments)  # type: ignore[attr-defined]
+    for text in ["edit one", "edit two"]:
+        if boundary != "during_review":
+            (module / name).write_text(text)
+        with pytest.raises(CommandError, match="Dirty submodule"):
+            loop.run(once=True, dry_run=False, max_iterations=1)
+        assert loop.beads.comments == original_comments  # type: ignore[attr-defined]
+        assert loop.beads.closed == []  # type: ignore[attr-defined]
+        assert (root / "ignored").exists() == (boundary == "during_review")
 
 
 @pytest.mark.parametrize("phase", ["implementer", "reviewer"])

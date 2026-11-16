@@ -397,9 +397,10 @@ close or profile is launched using that malformed context.
 
 
 Git status, diff, HEAD and untracked-path commands used for review context and
-`require_git_changes` each have a separate 30-second execution budget (at most
-five commands per collection). Diff collection disables external diff and textconv
-helpers. A timeout, launch failure or unsuccessful Git command stops the operation
+`require_git_changes` each have a separate 30-second execution budget per command
+(at most eight commands for context, five for a signature). Diff collection disables
+external diff and textconv helpers and forces submodule changes to remain visible
+regardless of repository ignore settings. A timeout, launch failure or unsuccessful Git command stops the operation
 with a command error; the review helper prints no comment and never launches its
 reviewer with failed context. Runner signature failures stop before launching a gated
 implementer or reviewer, or accepting their output. Git output is decoded without newline
@@ -436,6 +437,20 @@ implementer `require_git_changes` check: large untracked trees can stop a run
 before the implementer starts, and a failure after the implementer ran posts a
 fixed failure comment (details stay in the local log). No partial signature is accepted.
 These in-process limits are independent of each Git subprocess's budget.
+
+Submodules are supported only as clean gitlink commit references. Before collecting
+review context or a runner signature, beadsflow checks Git's NUL-delimited
+porcelain-v2 submodule flags with `--ignore-submodules=none`. Tracked/index edits
+and untracked content inside a submodule refuse evidence, including when Git's
+local or `.gitmodules` ignore policy would otherwise hide them. Nested source
+contents are not reviewed recursively: commit or clean those changes before
+retrying. A clean submodule checked out at another commit, and staged gitlink
+updates, remain supported through their commit IDs and ordinary diffs. Ignored
+nested files remain outside Git evidence. The same refusal applies before reviewer
+launch, before accepting output, when resuming an approval for automatic close,
+and to implementer `require_git_changes` signatures. A failed check does not
+publish runner approval, replace existing evidence or close an issue. Configured
+Beads-directory exclusions continue to apply to review evidence.
 
 
 Child readiness uses the refreshed child status as well as its dependencies: only `open`

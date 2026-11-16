@@ -155,3 +155,21 @@ def review_pathspec(root: Path, beads_dir: Path) -> list[str]:
         if relative != ".":
             scope.append(f":(top,literal,exclude){relative}")
     return scope
+
+
+def refuse_dirty_submodules(status: str) -> None:
+    """Admit porcelain-v2 gitlinks only when their nested worktrees are clean."""
+    records = iter(status.split("\0"))
+    for entry in records:
+        if not entry.startswith(("1 ", "2 ", "u ")):
+            continue
+        if entry.startswith("2 "):
+            next(records, None)  # The rename's original pathname is a separate NUL record.
+        submodule = entry.split(" ", 3)[2]
+        # S<c><m><u>: commit changes are represented by diffs; nested tracked or
+        # untracked bytes are not. Never certify the generic dirty marker.
+        if submodule.startswith("S") and submodule[2:] != "..":
+            raise CommandError(
+                "Dirty submodule worktrees are unsupported review evidence; "
+                "commit or clean nested changes before retrying"
+            )

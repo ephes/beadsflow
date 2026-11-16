@@ -12,7 +12,7 @@ from beadsflow.application.select import marker_from_comment, marker_from_text
 from beadsflow.domain.models import Comment, Issue, Marker, comment_order_key
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.git_command import capture_git
-from beadsflow.infra.git_signature import FingerprintBudget, review_pathspec, untracked_source
+from beadsflow.infra.git_signature import FingerprintBudget, refuse_dirty_submodules, review_pathspec, untracked_source
 from beadsflow.infra.run_command import DEFAULT_MAX_OUTPUT_BYTES, run_command
 
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 3600
@@ -109,6 +109,9 @@ def _collect_git_context(diff_max_bytes: int, *, beads_dir: str = ".beads") -> t
         raise CommandError("Review patch byte limit must be positive")
     root = Path(capture_git(["rev-parse", "--show-toplevel"]).rstrip("\n"))
     scope = review_pathspec(root, Path(beads_dir))
+    refuse_dirty_submodules(
+        capture_git(["status", "--porcelain=v2", "-z", "--ignore-submodules=none", "-uall", *scope], cwd=root)
+    )
     status = _run_git(["status", "-sb", *scope], cwd=root)
     diff_stat = _format_git_sections(
         _run_git(["diff", "--stat", *scope], cwd=root),

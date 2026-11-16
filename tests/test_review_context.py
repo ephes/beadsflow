@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -167,6 +168,27 @@ def test_tracked_invalid_utf8_patch_refuses_before_reviewer(
     monkeypatch.setattr(review, "_run_reviewer_command", lambda **kwargs: pytest.fail("reviewer launched"))
     with pytest.raises(CommandError, match="not valid UTF-8"):
         review.run_review(request())
+
+
+@pytest.mark.parametrize("kind", ["tracked", "staged", "untracked"])
+def test_dirty_submodule_refuses_before_reviewer(
+    review_tree: Path, add_submodule: Callable[[Path], Path], monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    module = add_submodule(review_tree)
+    name = "untracked" if kind == "untracked" else "tracked"
+    (module / name).write_text("unreviewed bytes")
+    if kind == "staged":
+        subprocess.run(["git", "add", name], cwd=module, check=True, capture_output=True)
+    launched: list[str] = []
+
+    def reviewer(**kwargs: object) -> str:
+        launched.append("reviewer")
+        return "LGTM"
+
+    monkeypatch.setattr(review, "_run_reviewer_command", reviewer)
+    with pytest.raises(CommandError, match="Dirty submodule"):
+        review.run_review(request())
+    assert launched == []
 
 
 def test_tracked_patch_preserves_carriage_returns(review_tree: Path) -> None:

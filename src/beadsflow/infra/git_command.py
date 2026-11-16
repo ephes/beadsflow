@@ -12,9 +12,9 @@ GIT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024
 def capture_git(
     args: list[str], *, cwd: Path | None = None, allow_exit: set[int] | None = None, preserve_output: bool = True
 ) -> str:
-    # Disable repository-configured diff helpers for every diff consumer.
+    # Disable configured helpers and keep clean gitlink commit changes visible.
     if args[0] == "diff":
-        args = ["diff", "--no-ext-diff", "--no-textconv", *args[1:]]
+        args = ["diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", *args[1:]]
     operation = "git " + " ".join(args)
     try:
         result = run_command(
