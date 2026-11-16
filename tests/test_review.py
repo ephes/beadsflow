@@ -257,8 +257,8 @@ def test_run_review_assembles_context_and_forwards_request(
         ("status", "-sb"): "## synthetic-branch",
         ("diff", "--stat"): "unstaged-stat",
         ("diff", "--staged", "--stat"): "staged-stat",
-        ("diff", "--patch"): "unstaged-patch-" + "雪" * 30 + "PATCH_TAIL",
-        ("diff", "--staged", "--patch"): "staged-patch",
+        ("diff", "--text", "--patch"): "unstaged-patch-" + "雪" * 30 + "PATCH_TAIL",
+        ("diff", "--staged", "--text", "--patch"): "staged-patch",
     }
 
     def fake_git(args: list[str], **kwargs: object) -> str:

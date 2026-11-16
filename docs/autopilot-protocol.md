@@ -193,7 +193,9 @@ never replayed automatically: a failed comment/close may already have applied.
 Read back issue status/comments before any explicit recovery or manual retry.
 
 The built-in helper admits complete tracked patches and untracked source text
-before invoking its reviewer. Untracked regular UTF-8 files use the fingerprint
+before invoking its reviewer. Tracked patches are rendered as text (binary
+classification and `-diff` attributes cannot hide a change) and, like untracked
+sources, must be valid UTF-8 without NUL. Untracked regular UTF-8 files use the fingerprint
 path and generation checks with shared byte/deadline limits; unsupported entries
 fail without reviewer launch. The positive patch byte limit covers the combined
 patch/source sections. Overflow refuses the review, rather than accepting an
@@ -204,7 +206,9 @@ own complete review context.
 
 Internal `bd` responses require strict UTF-8 before JSON admission; malformed byte
 sequences cannot change accepted issue/comment evidence through replacement
-characters. Profiles retain tolerant display decoding. Standalone reviewer and
+characters. Strict decoding applies to the stdout of completed commands; timeouts
+and output caps are reported as such, and malformed comment/close output keeps the
+uncertain-outcome readback instruction. Profiles retain tolerant display decoding. Standalone reviewer and
 `bd` failure diagnostics expose bounded operation/exit/category metadata only,
 including recovery and launch/parse failures. Raw output and external exception
 chains are omitted; no separate private capture is created on these paths.

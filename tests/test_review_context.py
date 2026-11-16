@@ -125,3 +125,54 @@ def test_complete_patch_preserves_final_added_line_whitespace(review_tree: Path)
     path.write_text("synthetic-trailing  \n")
     patch = review._collect_git_context(8000)[2]
     assert "+synthetic-trailing  \n" in patch
+
+
+@pytest.mark.parametrize("kind", ["nul", "diff-attribute"])
+def test_tracked_binary_change_is_shown_or_refused_before_reviewer(
+    review_tree: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    path = review_tree / "tracked.py"
+    path.write_text("before\n")
+    subprocess.run(["git", "add", "tracked.py"], check=True, capture_output=True)
+    prompts: list[str] = []
+
+    def reviewer(*, prompt: str, **kwargs: object) -> str:
+        prompts.append(prompt)
+        return "LGTM"
+
+    monkeypatch.setattr(review, "_run_reviewer_command", reviewer)
+    if kind == "nul":
+        path.write_bytes(b"before\nhidden_defect()\0\n")
+        with pytest.raises(CommandError, match="NUL"):
+            review.run_review(request())
+        assert prompts == []
+        return
+    (review_tree / ".git" / "info" / "attributes").write_text("tracked.py -diff\n")
+    path.write_text("before\nhidden_text_edit()\n")
+    assert review.run_review(request()) == "LGTM"
+    assert "+hidden_text_edit()" in prompts[0]
+    assert "Binary files" not in prompts[0]
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_tracked_invalid_utf8_patch_refuses_before_reviewer(
+    review_tree: Path, monkeypatch: pytest.MonkeyPatch, staged: bool
+) -> None:
+    path = review_tree / "tracked.py"
+    path.write_text("before\n")
+    subprocess.run(["git", "add", "tracked.py"], check=True, capture_output=True)
+    path.write_bytes(b"before\nvalue = '\xff'\n")
+    if staged:
+        subprocess.run(["git", "add", "tracked.py"], check=True, capture_output=True)
+    monkeypatch.setattr(review, "_run_reviewer_command", lambda **kwargs: pytest.fail("reviewer launched"))
+    with pytest.raises(CommandError, match="not valid UTF-8"):
+        review.run_review(request())
+
+
+def test_tracked_patch_preserves_carriage_returns(review_tree: Path) -> None:
+    path = review_tree / "tracked.py"
+    path.write_bytes(b"before\r\n")
+    subprocess.run(["git", "add", "tracked.py"], check=True, capture_output=True)
+    path.write_bytes(b"before\r\nafter\r\n")
+    patch = review._collect_git_context(8000)[2]
+    assert "+after\r\n" in patch

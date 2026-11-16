@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from beadsflow.application.errors import CommandError
 from beadsflow.application.runner import EpicRunLoop
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.settings import Settings
@@ -253,12 +254,15 @@ def test_diff_helpers_disabled(
     tracked.write_bytes(b"changed\0\r\n")
     before = loop._git_signature()
     monkeypatch.chdir(root)
-    _collect_git_context(8000)
+    # Raw NUL content reaches admission (no helper conversion) and is refused.
+    with pytest.raises(CommandError, match="NUL"):
+        _collect_git_context(8000)
     assert not marker.exists()
     tracked.write_bytes(b"changed again\0\r\n")
     assert loop._git_signature() != before
     git(root, "add", "tracked")
-    _collect_git_context(8000)
+    with pytest.raises(CommandError, match="NUL"):
+        _collect_git_context(8000)
     assert not marker.exists()
 
 
@@ -272,15 +276,15 @@ def test_review_context_handles_non_utf8_patch(loop: EpicRunLoop, monkeypatch: p
     git(root, "commit", "-m", "Synthetic text")
     tracked.write_bytes(b"caf\xe9\n")
     monkeypatch.chdir(root)
-    _status, _stat, patch = _collect_git_context(8000)
-    assert "caf\N{REPLACEMENT CHARACTER}" in patch
-    patch.encode("utf-8")
+    # Replacement text would hide the reviewed bytes: refuse instead.
+    with pytest.raises(CommandError, match="not valid UTF-8"):
+        _collect_git_context(8000)
     signature = loop._git_signature()
     tracked.write_bytes(b"caf\xef\n")
     assert loop._git_signature() != signature
     git(root, "add", "latin1.txt")
-    _status, _stat, patch = _collect_git_context(8000)
-    assert "caf\N{REPLACEMENT CHARACTER}" in patch
+    with pytest.raises(CommandError, match="not valid UTF-8"):
+        _collect_git_context(8000)
 
 
 def test_large_tracked_diff_keeps_signature_working(loop: EpicRunLoop) -> None:

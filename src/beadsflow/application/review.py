@@ -75,9 +75,22 @@ def _format_comment(comment: Comment | None, max_bytes: int) -> str:
     return f"{header}\n{body}"
 
 
-def _run_git(args: list[str], *, cwd: Path | None = None) -> str:
-    # Review prompts are display text; signatures keep the byte-preserving default.
-    return capture_git(args, cwd=cwd, preserve_output=False)
+def _run_git(args: list[str], *, cwd: Path | None = None, preserve_output: bool = False) -> str:
+    # Status/stat are display text; patches and signatures keep raw bytes.
+    return capture_git(args, cwd=cwd, preserve_output=preserve_output)
+
+
+def _tracked_patch(args: list[str], *, cwd: Path) -> str:
+    # Force text hunks (binary content or a `-diff` attribute would otherwise hide
+    # the change) and admit them under the same UTF-8/NUL policy as untracked sources.
+    patch = _run_git(args, cwd=cwd, preserve_output=True)
+    try:
+        patch.encode("utf-8")
+    except UnicodeEncodeError:
+        raise CommandError("Review tracked patch is not valid UTF-8") from None
+    if "\0" in patch:
+        raise CommandError("Review tracked patch contains NUL")
+    return patch
 
 
 def _format_git_sections(unstaged: str, staged: str) -> str:
@@ -102,8 +115,8 @@ def _collect_git_context(diff_max_bytes: int, *, beads_dir: str = ".beads") -> t
         _run_git(["diff", "--staged", "--stat", *scope], cwd=root),
     )
     diff_patch = _format_git_sections(
-        _run_git(["diff", "--patch", *scope], cwd=root),
-        _run_git(["diff", "--staged", "--patch", *scope], cwd=root),
+        _tracked_patch(["diff", "--text", "--patch", *scope], cwd=root),
+        _tracked_patch(["diff", "--staged", "--text", "--patch", *scope], cwd=root),
     )
     untracked = capture_git(["ls-files", "--others", "--exclude-standard", "-z", *scope], cwd=root)
     budget = FingerprintBudget.start()

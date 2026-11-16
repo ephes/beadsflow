@@ -103,7 +103,10 @@ Untracked sources must be regular UTF-8 files without NUL; symlinks, directories
 are refused before reviewer launch. Reads share the fingerprint path, generation,
 byte and deadline checks, with source bytes additionally bounded by the smaller
 of the patch limit and 64 KiB prompt limit. Track or ignore unsupported files
-deliberately before retrying.
+deliberately before retrying. Tracked patches are rendered as text (`git diff --text`),
+so binary classification or a `-diff` attribute cannot hide a change; their raw bytes,
+including carriage returns, are shown, and invalid UTF-8 or NUL content refuses the
+review the same way.
 
 The complete patch and source sections must fit the positive `--diff-max-bytes`
 limit (default 8000); trailing patch whitespace is preserved and patches are never clipped into an approval-capable review.
@@ -354,9 +357,12 @@ This policy covers automatic profile-failure and invalid-verdict diagnostics; co
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to one second for output draining. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync `show` failure triggers automatic import/retry in normal runs. Comment and close failures never trigger recovery/replay; their outcome is uncertain, so read back the issue/comments before any manual retry; other failures stop immediately. Dry-run reads disable import recovery and stop with instructions to run `bd sync --import-only` explicitly before retrying. Dry runs still create/acquire the documented lock files, but never invoke sync, profiles, comment or close. `run.command_timeout_seconds` continues to apply only to profiles.
 
 Internal `bd` output is decoded as strict UTF-8 before JSON admission or recovery
-classification. Malformed/truncated sequences fail with a fixed `BeadsError`;
+classification. Malformed/truncated sequences fail with a `BeadsError` naming only
+the operation (comment/close add the uncertain-outcome readback instruction);
 replacement characters are never substituted into structured evidence. Valid
-multibyte text split across process reads is preserved. Profile display output
+multibyte text split across process reads is preserved. Strict decoding covers stdout
+of completed commands only: timeouts and output caps are reported as such, and
+stderr stays diagnostic text. Profile display output
 retains its intentional replacement decoding.
 
 `bd show` must return exactly one issue object whose ID exactly matches the requested
@@ -385,8 +391,9 @@ helpers. A timeout, launch failure or unsuccessful Git command stops the operati
 with a command error; the review helper prints no comment and never launches its
 reviewer with failed context. Runner signature failures stop before launching a gated
 implementer or reviewer, or accepting their output. Git output is decoded without newline
-translation or loss of filename bytes for signatures. Review prompts replace
-invalid UTF-8 with replacement characters so non-UTF-8 text patches remain reviewable. Owned Git process groups
+translation or loss of filename bytes for signatures. Review status and
+statistics replace invalid UTF-8 with replacement characters; tracked patches are
+refused instead, because a reviewer cannot approve bytes it did not see. Owned Git process groups
 use the same TERM/KILL cleanup as runner profiles, with up to one second of
 additional output draining; descendants that deliberately leave the group are
 outside this guarantee. These budgets are separate from profile/reviewer timeouts.

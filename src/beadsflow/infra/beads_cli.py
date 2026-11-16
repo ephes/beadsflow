@@ -120,7 +120,7 @@ class BeadsCli:
     def _is_db_out_of_sync(stderr: str) -> bool:
         return "Database out of sync with JSONL" in stderr
 
-    def _execute(self, argv: list[str], *, deadline: float, operation: str) -> CommandResult:
+    def _execute(self, argv: list[str], *, deadline: float, operation: str, read: bool) -> CommandResult:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise BeadsError(f"{operation} timed out")
@@ -129,7 +129,9 @@ class BeadsCli:
         try:
             result = run_command(argv=argv, timeout_seconds=remaining, env=self._env(), strict_utf8=True)
         except UnicodeDecodeError:
-            failure = "Invalid UTF-8 from bd"
+            failure = f"{operation}: invalid UTF-8 from bd"
+            if not read:
+                failure += "; outcome uncertain; read back Beads state before any manual retry."
         except OSError as exc:
             failure = f"Cannot execute {operation} ({type(exc).__name__})"
         # Raise outside the handler: raw external errors must not survive in
@@ -149,11 +151,12 @@ class BeadsCli:
         # Include the operation and issue, but never a comments-add body.
         count = 3 if diagnostic_args[0] == "comments" else 2
         operation = "bd " + shlex.join(arg[:200] for arg in diagnostic_args[:count])
-        completed = self._execute(argv, deadline=deadline, operation=operation)
+        read = diagnostic_args[0] == "show"
+        completed = self._execute(argv, deadline=deadline, operation=operation, read=read)
         if completed.returncode != 0 and self._is_db_out_of_sync(completed.stderr):
             # Only this public read is safe to replay. Writes may have committed
             # before reporting failure; importing cannot prove otherwise.
-            if diagnostic_args[0] != "show":
+            if not read:
                 raise BeadsError(f"{operation}: outcome uncertain; read back Beads state before any manual retry.")
             if not self.auto_sync:
                 raise BeadsError(
@@ -165,13 +168,14 @@ class BeadsCli:
                 self._argv("sync", "--import-only"),
                 deadline=deadline,
                 operation=recovery_operation,
+                read=False,
             )
             if sync.returncode != 0:
                 raise BeadsError(f"{recovery_operation} failed (exit {sync.returncode})")
-            completed = self._execute(argv, deadline=deadline, operation=operation)
+            completed = self._execute(argv, deadline=deadline, operation=operation, read=read)
         if completed.returncode != 0:
             failure = f"{operation} failed (exit {completed.returncode})"
-            if diagnostic_args[0] != "show":
+            if not read:
                 failure += "; outcome uncertain; read back Beads state before any manual retry."
             raise BeadsError(failure)
         return completed

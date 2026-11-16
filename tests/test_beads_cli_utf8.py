@@ -34,8 +34,36 @@ def test_bd_json_rejects_malformed_utf8_before_issue_admission(
     monkeypatch.setattr(
         BeadsCli, "_argv", lambda self, *args: [sys.executable, "-c", f"import os; os.write(1, {raw!r})"]
     )
-    with pytest.raises(BeadsError, match="Invalid UTF-8 from bd"):
+    with pytest.raises(BeadsError, match="invalid UTF-8 from bd") as excinfo:
         BeadsCli(".beads").get_issue("child")
+    assert "bd show child" in str(excinfo.value) and "outcome uncertain" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize("operation", ["comment", "close"])
+def test_bd_write_with_malformed_stdout_reports_uncertain_outcome(
+    monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    monkeypatch.setattr(
+        BeadsCli, "_argv", lambda self, *args: [sys.executable, "-c", "import os; os.write(1,b'\\xff')"]
+    )
+    cli = BeadsCli(".beads")
+    with pytest.raises(BeadsError, match="invalid UTF-8 from bd; outcome uncertain; read back"):
+        if operation == "comment":
+            cli.comment("child", "SECRET-BODY")
+        else:
+            cli.close("child")
+
+
+def test_bd_non_utf8_stderr_on_success_does_not_fail_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    script = "import os; os.write(2,b'warn\\xff')"
+    monkeypatch.setattr(BeadsCli, "_argv", lambda self, *args: [sys.executable, "-c", script])
+    BeadsCli(".beads").close("child")
+
+
+def test_strict_utf8_timeout_reports_timeout_not_decode_error() -> None:
+    script = "import os,time; os.write(1,b'\\xe9'); time.sleep(5)"
+    result = run_command(argv=[sys.executable, "-c", script], timeout_seconds=0.5, env={}, strict_utf8=True)
+    assert result.returncode == 124 and result.limit == "timeout"
 
 
 def test_bd_json_preserves_valid_utf8_split_across_writes(monkeypatch: pytest.MonkeyPatch) -> None:

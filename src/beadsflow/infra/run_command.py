@@ -75,8 +75,8 @@ def run_command(
         env={**os.environ, **env},
     )
 
-    def decode(value: bytes) -> str:
-        if strict_utf8:
+    def decode(value: bytes, *, strict: bool = False) -> str:
+        if strict:
             return value.decode("utf-8")
         if preserve_output:
             return value.decode("utf-8", errors="surrogateescape")
@@ -111,7 +111,9 @@ def run_command(
     return CommandResult(
         argv=argv,
         returncode=code,
-        stdout=decode(bytes(output[0])),
+        # Strict admission applies to the stdout of a completed command only; a
+        # stopped capture may end mid-character and stderr is diagnostic text.
+        stdout=decode(bytes(output[0]), strict=strict_utf8 and limit is None),
         stderr=decode(bytes(output[1])) + notice,
         limit=limit,
     )
