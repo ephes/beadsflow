@@ -5,12 +5,14 @@ import os
 import shlex
 import textwrap
 from dataclasses import dataclass
+from pathlib import Path
 
 from beadsflow.application.errors import CommandError
 from beadsflow.application.select import marker_from_comment, marker_from_text
 from beadsflow.domain.models import Comment, Issue, Marker, comment_order_key
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.git_command import capture_git
+from beadsflow.infra.git_signature import FingerprintBudget, review_pathspec, untracked_source
 from beadsflow.infra.run_command import DEFAULT_MAX_OUTPUT_BYTES, run_command
 
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 3600
@@ -73,9 +75,9 @@ def _format_comment(comment: Comment | None, max_bytes: int) -> str:
     return f"{header}\n{body}"
 
 
-def _run_git(args: list[str]) -> str:
+def _run_git(args: list[str], *, cwd: Path | None = None) -> str:
     # Review prompts are display text; signatures keep the byte-preserving default.
-    return capture_git(args, preserve_output=False).strip()
+    return capture_git(args, cwd=cwd, preserve_output=False).strip()
 
 
 def _format_git_sections(unstaged: str, staged: str) -> str:
@@ -89,18 +91,38 @@ def _format_git_sections(unstaged: str, staged: str) -> str:
     return "\n\n".join(sections)
 
 
-def _collect_git_context(diff_max_bytes: int) -> tuple[str, str, str]:
-    status = _run_git(["status", "-sb"])
+def _collect_git_context(diff_max_bytes: int, *, beads_dir: str = ".beads") -> tuple[str, str, str]:
+    if diff_max_bytes <= 0:
+        raise CommandError("Review patch byte limit must be positive")
+    root = Path(capture_git(["rev-parse", "--show-toplevel"]).rstrip("\n"))
+    scope = review_pathspec(root, Path(beads_dir))
+    status = _run_git(["status", "-sb", *scope], cwd=root)
     diff_stat = _format_git_sections(
-        _run_git(["diff", "--stat"]),
-        _run_git(["diff", "--staged", "--stat"]),
+        _run_git(["diff", "--stat", *scope], cwd=root),
+        _run_git(["diff", "--staged", "--stat", *scope], cwd=root),
     )
     diff_patch = _format_git_sections(
-        _run_git(["diff", "--patch"]),
-        _run_git(["diff", "--staged", "--patch"]),
+        _run_git(["diff", "--patch", *scope], cwd=root),
+        _run_git(["diff", "--staged", "--patch", *scope], cwd=root),
     )
-    diff_patch = _truncate_with_notice(diff_patch, diff_max_bytes)
+    untracked = capture_git(["ls-files", "--others", "--exclude-standard", "-z", *scope], cwd=root)
+    budget = FingerprintBudget.start()
+    budget.remaining_bytes = min(budget.remaining_bytes, diff_max_bytes, MAX_PROMPT_BYTES)
+    _admit_complete_patch(diff_patch, diff_max_bytes)
+    for relative in sorted(filter(None, untracked.split("\0"))):
+        source = untracked_source(root, relative, budget=budget)
+        diff_patch += f"\n\nUntracked source {relative!r}:\n{source}"
+        _admit_complete_patch(diff_patch, diff_max_bytes)
+    budget.check()
     return status, diff_stat, diff_patch
+
+
+def _admit_complete_patch(patch: str, max_bytes: int) -> None:
+    if len(patch.encode("utf-8")) > min(max_bytes, MAX_PROMPT_BYTES):
+        raise CommandError(
+            "Review complete Git patch exceeds byte limit; reduce the slice or increase --diff-max-bytes "
+            "within the complete prompt budget"
+        )
 
 
 def _build_prompt(
@@ -147,7 +169,7 @@ def _build_prompt(
         Git diff (stat):
         {diff_stat}
 
-        Git diff (patch, truncated):
+        Git diff (complete patch and untracked sources):
         {diff_patch}
 
         Respond with a single Beads comment. The first non-empty line must be exactly
@@ -217,7 +239,7 @@ def run_review(request: ReviewRequest) -> str:
     issue = beads.get_issue(request.issue_id)
     ready_comment = _latest_comment(issue.comments, {Marker.READY_FOR_REVIEW})
     review_comment = _latest_comment(issue.comments, {Marker.LGTM, Marker.CHANGES_REQUESTED})
-    git_status, diff_stat, diff_patch = _collect_git_context(request.diff_max_bytes)
+    git_status, diff_stat, diff_patch = _collect_git_context(request.diff_max_bytes, beads_dir=request.beads_dir)
     prompt = _build_prompt(
         issue=issue,
         epic_id=request.epic_id,

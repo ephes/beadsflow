@@ -16,7 +16,7 @@ from beadsflow.domain.models import Comment, Issue, IssueStatus, IssueType, Mark
 from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.command_log import write_command_log
 from beadsflow.infra.git_command import capture_git
-from beadsflow.infra.git_signature import FingerprintBudget, untracked_signature
+from beadsflow.infra.git_signature import FingerprintBudget, review_pathspec, untracked_signature
 from beadsflow.infra.paths import RepoPaths
 from beadsflow.infra.run_command import CommandResult, run_command
 from beadsflow.settings import Profile, Settings
@@ -425,16 +425,7 @@ class EpicRunLoop:
             raise CommandError("Git signature requires git but git is not available")
         scope: list[str] = []
         if exclude_beads:
-            # A resumed process rewrites the PID; this is not reviewed content.
-            scope = ["--", ".", ":(top,literal,exclude).beadsflow/locks/execution.lock"]
-            try:
-                beads_dir = self.repo_paths.beads_dir.resolve()
-                relative = beads_dir.relative_to(self.repo_paths.worktree_root.resolve()).as_posix()
-            except ValueError:
-                pass  # External Beads databases are already outside the signature.
-            else:
-                if relative != ".":
-                    scope.append(f":(top,literal,exclude){relative}")
+            scope = review_pathspec(self.repo_paths.worktree_root, self.repo_paths.beads_dir)
         status = self._git_capture(["git", "status", "--porcelain=v1", "-uall", *scope], allow_exit={0})
         diff = self._git_capture(["git", "diff", "--binary", *scope], allow_exit={0, 1})
         staged = self._git_capture(["git", "diff", "--binary", "--cached", *scope], allow_exit={0, 1})

@@ -21,7 +21,7 @@ def test_standalone_overflow_prints_no_approval(
     now = datetime(2026, 1, 1, tzinfo=UTC)
     issue = Issue("child", "Synthetic", IssueStatus.OPEN, 0, IssueType.TASK, now, now, [], [], [])
     monkeypatch.setattr(review.BeadsCli, "get_issue", lambda self, issue_id: issue)
-    monkeypatch.setattr(review, "_collect_git_context", lambda limit: ("status", "stat", "patch"))
+    monkeypatch.setattr(review, "_collect_git_context", lambda limit, **kwargs: ("status", "stat", "patch"))
     script = (
         "import os\n"
         + ("os.write(1, b'LGTM\\n')\n" if marker_first else "")
@@ -111,7 +111,7 @@ def test_complete_prompt_overflow_refuses_launch_and_approval(
     monkeypatch.setattr(
         review,
         "_collect_git_context",
-        lambda limit: (
+        lambda limit, **kwargs: (
             large if section == "status" else "status",
             large if section == "stat" else "z" * 24000 if section == "combined" else "stat",
             "patch",

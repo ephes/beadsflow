@@ -261,9 +261,10 @@ def test_run_review_assembles_context_and_forwards_request(
         ("diff", "--staged", "--patch"): "staged-patch",
     }
 
-    def fake_git(args: list[str]) -> str:
-        events.append(tuple(args))
-        return git_outputs[tuple(args)]
+    def fake_git(args: list[str], **kwargs: object) -> str:
+        command = tuple(args[: args.index("--")])
+        events.append(command)
+        return git_outputs[command]
 
     recorded: list[dict[str, object]] = []
 
@@ -273,9 +274,12 @@ def test_run_review_assembles_context_and_forwards_request(
 
     monkeypatch.setattr(review, "BeadsCli", FakeBeads)
     monkeypatch.setattr(review, "_run_git", fake_git)
+    monkeypatch.setattr(
+        review, "capture_git", lambda args, **kwargs: "/synthetic/root\n" if args[0] == "rev-parse" else ""
+    )
     monkeypatch.setattr(review, "_run_reviewer_command", reviewer)
     request = review.ReviewRequest(
-        "child-1", "epic-1", "synthetic-beads", True, "fake-review --flag", "--prompt", 55, 45, 17
+        "child-1", "epic-1", "synthetic-beads", True, "fake-review --flag", "--prompt", 1000, 45, 17
     )
     assert review.run_review(request) == expected
     assert events[:2] == [("synthetic-beads", True), "child-1"]
@@ -310,12 +314,16 @@ def test_run_review_assembles_context_and_forwards_request(
         assert body.startswith(prefix) and body.endswith(TRUNCATED_NOTICE)
         assert len(body.encode("utf-8")) <= 45
         assert "雪" in body
-    patch = prompt.split("Git diff (patch, truncated):\n", 1)[1].split("Respond with a single", 1)[0].strip()
+    patch = (
+        prompt.split("Git diff (complete patch and untracked sources):\n", 1)[1]
+        .split("Respond with a single", 1)[0]
+        .strip()
+    )
     assert "Unstaged:\nunstaged-patch-" in patch
-    assert len(patch.encode("utf-8")) <= 55
-    assert patch.endswith(TRUNCATED_NOTICE)
-    assert prompt.count(TRUNCATED_NOTICE) == 3
-    assert "PATCH_TAIL" not in prompt and "READY_TAIL" not in prompt and "REVIEW_TAIL" not in prompt
+    assert len(patch.encode("utf-8")) <= 1000
+    assert "PATCH_TAIL" in patch and "staged-patch" in patch
+    assert prompt.count(TRUNCATED_NOTICE) == 2
+    assert "READY_TAIL" not in prompt and "REVIEW_TAIL" not in prompt
     assert "\ufffd" not in prompt
 
 

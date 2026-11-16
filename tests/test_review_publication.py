@@ -233,10 +233,9 @@ def test_tracked_beads_export_does_not_mask_code_changes(
 
 
 def test_non_git_review_fails_before_launch(review_loop: EpicRunLoop) -> None:
-    import shutil
-
     root = review_loop.repo_paths.repo_root
-    shutil.rmtree(root / ".git")
+    # Detach Git without racing background maintenance's temporary lock cleanup.
+    (root / ".git").rename(root / "retired-git")
     loop = with_script(review_loop, "from pathlib import Path; Path('ignored').write_text('ran'); print('LGTM')")
     with pytest.raises(CommandError, match="git status"):
         loop.run(once=True, dry_run=False, max_iterations=1)
@@ -603,3 +602,27 @@ def test_close_rechecks_readiness_and_membership_after_git_collection(
     assert replace(loop, reviewer_name=None).run(once=True, dry_run=dry_run, max_iterations=1) == 0
     assert loop.beads.closed == []  # type: ignore[attr-defined]
     assert loop.beads.comments == comments  # type: ignore[attr-defined]
+
+
+def test_incomplete_helper_context_cannot_mint_runner_evidence(
+    review_loop: EpicRunLoop, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import beadsflow.application.review as review
+
+    loop = with_script(review_loop, "unused")
+    (loop.repo_paths.repo_root / "tracked").write_text("safe-prefix\n" + "x\n" * 5000 + "synthetic_defect()\n")
+    monkeypatch.chdir(loop.repo_paths.repo_root)
+    monkeypatch.setattr(review.BeadsCli, "get_issue", lambda self, issue_id: loop.beads.get_issue(issue_id))
+    monkeypatch.setattr(review, "_run_reviewer_command", lambda **kwargs: "LGTM")
+
+    def execute(self: EpicRunLoop, *, argv: list[str], issue_id: str) -> CommandResult:
+        body = review.run_review(
+            review.ReviewRequest(issue_id, "epic", ".beads", False, "synthetic", "-p", 8000, 4000)
+        )
+        return CommandResult(argv, 0, body, "")
+
+    monkeypatch.setattr(EpicRunLoop, "_exec", execute)
+    with pytest.raises(CommandError, match="complete.*patch"):
+        loop.run(once=False, dry_run=False, max_iterations=3)
+    assert not any("LGTM" in c.text or "Beadsflow reviewed" in c.text for c in loop.beads.comments)  # type: ignore[attr-defined]
+    assert loop.beads.closed == []  # type: ignore[attr-defined]

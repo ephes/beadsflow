@@ -243,6 +243,12 @@ Coordination is done via Beads comments on the child bead:
 - Implementer signals completion with a comment that starts with `Ready for review:`.
 - Untracked signature collection shares a 64 MiB cumulative byte budget and a 30-second monotonic deadline, with reads limited to each opened snapshot size. Detected file changes or exhausted budgets fail closed without accepting partial evidence or changing approval/close state. The budget also applies to implementer `require_git_changes` checks; a post-implementer failure posts a fixed failure comment.
 - Runner review results are accepted/published only if the pre/post Git signature (excluding a configured Beads metadata subdirectory and `.beadsflow/locks/execution.lock`) is unchanged; reviewers require an available Git worktree, including for Beads-only projects that previously ran without Git; edits are preserved on refusal. Successful approval receives a runner-recorded `LGTM` comment carrying a digest of the reviewed Git signature and canonical issue requirements. This checks content freshness and does not authenticate authorship; Beads writers can reproduce it. Bind the digest to canonical issue ID/title/type/description/acceptance criteria and sorted dependency ID/type pairs, excluding comments, timestamps, priority and dependency status. Re-read requirements after review, before evidence publication and after Git collection immediately before close; recheck child readiness and explicit membership in a freshly read epic at that boundary, deferring changed intent to the next selection pass; refuse changed requirements and old Git-only evidence. Recompare the current signature immediately before automatic close, including resumed runs; changed content or missing/invalid evidence requires review again. Prefer stdout publication; command-mode profiles own direct Beads side effects.
+- Built-in reviews include complete tracked patches and bounded untracked regular
+  UTF-8 source contents using the signature path/generation policy and exclusions.
+  Unsupported files, binary/NUL/invalid UTF-8 source, nonpositive patch limits and
+  incomplete over-limit patches refuse review before reviewer launch. No clipped
+  helper approval can receive runner evidence. Keep comment preview truncation
+  separate from positive complete-patch admission and the 64 KiB prompt ceiling.
 - Reviewer responds with either:
   - `LGTM`, or
   - `Changes requested:` followed by actionable notes.

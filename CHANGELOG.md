@@ -44,6 +44,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Include complete admitted untracked UTF-8 source contents in built-in review context using shared fingerprint path/generation checks and review exclusions. Refuse unsupported or oversized sources before reviewer launch. Require the complete tracked/untracked patch to fit the positive patch budget; clipped evidence can no longer produce helper approval or runner approval evidence.
+
 - Recheck child readiness and current epic membership after close-signature collection; defer changed intent without closing or superseding approval. Limit out-of-sync import/replay to reads; uncertain comment/close writes require explicit state readback before retry.
 
 - Refuse standalone reviewer prompts above 64 KiB of complete UTF-8 context before launch, including issue requirements and Git status/stat; invalid UTF-8/NUL contexts also fail without a comment or approval.

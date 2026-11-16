@@ -191,3 +191,13 @@ or closing. These reads do not lock out subsequent external Beads edits.
 Automatic out-of-sync import/replay is restricted to `bd show`. Mutations are
 never replayed automatically: a failed comment/close may already have applied.
 Read back issue status/comments before any explicit recovery or manual retry.
+
+The built-in helper admits complete tracked patches and untracked source text
+before invoking its reviewer. Untracked regular UTF-8 files use the fingerprint
+path and generation checks with shared byte/deadline limits; unsupported entries
+fail without reviewer launch. The positive patch byte limit covers the combined
+patch/source sections. Overflow refuses the review, rather than accepting an
+`LGTM` for unseen trailing changes; no helper approval or runner evidence is
+published. Comment previews may still be truncated, and the 64 KiB complete
+prompt admission remains in force. Custom reviewer profiles must provide their
+own complete review context.

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
@@ -36,6 +38,30 @@ class FingerprintBudget:
 def untracked_signature(root: Path, relative: str, *, budget: FingerprintBudget | None = None) -> bytes:
     """Hash Git-reported paths without traversing symlinks or reading special files."""
     budget = budget if budget is not None else FingerprintBudget.start()
+    with _untracked_parent(root, relative, budget) as (directory, name):
+        return _entry_signature(directory, name, budget)
+
+
+def untracked_source(root: Path, relative: str, *, budget: FingerprintBudget) -> str:
+    """Admit complete UTF-8 regular-file evidence under the fingerprint path policy."""
+    with _untracked_parent(root, relative, budget) as (directory, name):
+        metadata = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise CommandError("Untracked review source must be a regular file")
+        data = b"".join(_regular_chunks(directory, name, metadata, budget))
+        _check_named_generation(directory, name, metadata)
+        budget.check()
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise CommandError("Untracked review source is not valid UTF-8") from None
+    if "\0" in text:
+        raise CommandError("Untracked review source contains NUL")
+    return text
+
+
+@contextmanager
+def _untracked_parent(root: Path, relative: str, budget: FingerprintBudget) -> Iterator[tuple[int, str]]:
     budget.check()
     parts = relative.removesuffix("/").split("/")
     if any(part in {"", ".", ".."} for part in parts):
@@ -50,7 +76,7 @@ def untracked_signature(root: Path, relative: str, *, budget: FingerprintBudget 
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
             os.close(directory)
             directory = child
-        return _entry_signature(directory, parts[-1], budget)
+        yield directory, parts[-1]
     except OSError as exc:
         raise CommandError(f"Cannot fingerprint untracked path: {relative}") from exc
     finally:
@@ -76,29 +102,50 @@ def _entry_signature(directory: int, name: str, budget: FingerprintBudget) -> by
         budget.reserve(len(target))
         digest.update(target)
     elif stat.S_ISREG(metadata.st_mode):
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
-        with os.fdopen(fd, "rb", buffering=0) as handle:
-            opened = os.fstat(handle.fileno())
-            if not stat.S_ISREG(opened.st_mode):
-                raise CommandError(f"Untracked path is not a regular file or symlink: {name[:120]!r}")
-            if _generation(metadata) != _generation(opened):
-                raise CommandError("Untracked file changed during fingerprinting")
-            budget.reserve(metadata.st_size)
-            remaining = metadata.st_size
-            while remaining:
-                budget.check()
-                chunk = handle.read(min(65536, remaining))
-                if not chunk:
-                    raise CommandError("Untracked file changed during fingerprinting")
-                digest.update(chunk)
-                remaining -= len(chunk)
-            after = os.fstat(handle.fileno())
-            if _generation(metadata) != _generation(after):
-                raise CommandError("Untracked file changed during fingerprinting")
+        for chunk in _regular_chunks(directory, name, metadata, budget):
+            digest.update(chunk)
     else:
         raise CommandError(f"Untracked path is not a regular file or symlink: {name[:120]!r}")
+    _check_named_generation(directory, name, metadata)
+    budget.check()
+    return str(metadata.st_mode).encode("ascii") + b":" + digest.digest()
+
+
+def _regular_chunks(directory: int, name: str, metadata: os.stat_result, budget: FingerprintBudget) -> Iterator[bytes]:
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    with os.fdopen(fd, "rb", buffering=0) as handle:
+        opened = os.fstat(handle.fileno())
+        if not stat.S_ISREG(opened.st_mode):
+            raise CommandError(f"Untracked path is not a regular file or symlink: {name[:120]!r}")
+        if _generation(metadata) != _generation(opened):
+            raise CommandError("Untracked file changed during fingerprinting")
+        budget.reserve(metadata.st_size)
+        remaining = metadata.st_size
+        while remaining:
+            budget.check()
+            chunk = handle.read(min(65536, remaining))
+            if not chunk:
+                raise CommandError("Untracked file changed during fingerprinting")
+            yield chunk
+            remaining -= len(chunk)
+        after = os.fstat(handle.fileno())
+        if _generation(metadata) != _generation(after):
+            raise CommandError("Untracked file changed during fingerprinting")
+
+
+def _check_named_generation(directory: int, name: str, metadata: os.stat_result) -> None:
     named_after = os.stat(name, dir_fd=directory, follow_symlinks=False)
     if _generation(metadata) != _generation(named_after):
         raise CommandError("Untracked file changed during fingerprinting")
-    budget.check()
-    return str(metadata.st_mode).encode("ascii") + b":" + digest.digest()
+
+
+def review_pathspec(root: Path, beads_dir: Path) -> list[str]:
+    scope = ["--", ".", ":(top,literal,exclude).beadsflow/locks/execution.lock"]
+    try:
+        relative = beads_dir.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        pass  # External databases are already outside the worktree.
+    else:
+        if relative != ".":
+            scope.append(f":(top,literal,exclude){relative}")
+    return scope

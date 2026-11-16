@@ -95,8 +95,22 @@ then asks a local CLI (default: `claude -p`) to produce a review comment. It pri
 
 The helper includes the issue identity/title/status/description/acceptance criteria,
 latest readiness and review comments, Git status, staged/unstaged diff statistics,
-and a byte-limited patch. Comment bodies have a separate byte limit. Truncation
-preserves UTF-8 and adds a notice when space permits. Synthetic orchestration tests
+and the complete staged/unstaged patch plus untracked source contents. Collection
+covers the whole Git worktree, including outside nested project roots, with the
+same configured Beads-directory and execution-lock exclusions as review signatures.
+Untracked sources must be regular UTF-8 files without NUL; symlinks, directories
+(including nested repositories), special files and binary/invalid UTF-8 sources
+are refused before reviewer launch. Reads share the fingerprint path, generation,
+byte and deadline checks, with source bytes additionally bounded by the smaller
+of the patch limit and 64 KiB prompt limit. Track or ignore unsupported files
+deliberately before retrying.
+
+The complete patch and source sections must fit the positive `--diff-max-bytes`
+limit (default 8000); they are never clipped into an approval-capable review.
+Overflow stops before reviewer launch and prints no review comment. Reduce the
+slice or raise the patch limit within the complete prompt budget. Comment bodies
+have a separate byte limit; comment truncation preserves UTF-8 and adds a notice
+when space permits. Synthetic orchestration tests
 exercise this assembly, request forwarding, Git failure handling and conservative
 verdict normalization without running Beads or an agent.
 
@@ -112,7 +126,7 @@ Use `--prompt-arg` to match the flag your CLI uses to receive the prompt (defaul
 The configured reviewer interface passes the prompt as one command argument. The
 **complete prompt** must fit 64 KiB of UTF-8, including title, description,
 acceptance criteria, comment headers, Git status/stat and formatting. This cap is
-separate from the patch/comment truncation settings. An oversized, unencodable or
+separate from the patch admission and comment truncation settings. An oversized, unencodable or
 NUL-containing prompt is refused before reviewer launch, with a nonzero exit and
 no review comment/approval. Requirements are never silently shortened to fit.
 Reduce the issue or Git context and retry; this interface does not configure a
