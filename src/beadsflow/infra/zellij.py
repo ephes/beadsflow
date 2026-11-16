@@ -5,6 +5,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import Literal
 
+from beadsflow.application.errors import CommandError
 from beadsflow.infra.run_command import run_command
 
 ZellijErrorKind = Literal["missing", "failed"]
@@ -78,6 +79,8 @@ class Zellij:
             raise ZellijError(
                 kind="failed", message=f"Cannot execute zellij list-sessions ({type(exc).__name__})"
             ) from exc
+        except CommandError as exc:
+            raise ZellijError(kind="failed", message="zellij list-sessions cleanup incomplete") from exc
         if completed.limit == "timeout":
             raise ZellijError(
                 kind="failed", message=f"zellij list-sessions timed out after {CONTROL_TIMEOUT_SECONDS} seconds"

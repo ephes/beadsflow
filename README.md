@@ -20,8 +20,11 @@ cannot be reaped, ordinary completion raises a command error instead of reportin
 success; timeout/output-limit results retain codes 124/125 and include a cleanup
 uncertainty diagnostic. Signal, drain, reap and both pipe-close stages are attempted
 independently. An initiating exception (including interruption) is re-raised with
-bounded cleanup notes that contain no external exception text. Cleanup failures
-after ordinary completion raise a command error. An escaped descendant is outside
+bounded cleanup notes that contain no external exception text. An interruption
+(`KeyboardInterrupt`, `SystemExit`) that arrives during cleanup is re-raised after
+the remaining stages run, so a second Ctrl-C is never turned into an ordinary
+result. Other cleanup failures after ordinary completion raise a command error;
+internal `bd` and Zellij inventory commands report it as their own error type. An escaped descendant is outside
 the cleanup guarantee.
 See the [command contracts](docs/quickstart.md) for details.
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from beadsflow.application.errors import BeadsError
+from beadsflow.application.errors import BeadsError, CommandError
 from beadsflow.domain.models import Comment, Dependency, Issue, IssueStatus, IssueSummary, IssueType
 from beadsflow.infra.run_command import CommandResult, run_command
 
@@ -93,6 +93,12 @@ def _records(raw: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return records
 
 
+def _uncertain(failure: str, *, read: bool) -> str:
+    if read:
+        return failure
+    return failure + "; outcome uncertain; read back Beads state before any manual retry."
+
+
 @dataclass(frozen=True, slots=True)
 class BeadsCli:
     beads_dir: str
@@ -129,11 +135,12 @@ class BeadsCli:
         try:
             result = run_command(argv=argv, timeout_seconds=remaining, env=self._env(), strict_utf8=True)
         except UnicodeDecodeError:
-            failure = f"{operation}: invalid UTF-8 from bd"
-            if not read:
-                failure += "; outcome uncertain; read back Beads state before any manual retry."
+            failure = _uncertain(f"{operation}: invalid UTF-8 from bd", read=read)
         except OSError as exc:
             failure = f"Cannot execute {operation} ({type(exc).__name__})"
+        except CommandError:
+            # Cleanup after completion failed; the command itself may have run.
+            failure = _uncertain(f"{operation}: command cleanup incomplete", read=read)
         # Raise outside the handler: raw external errors must not survive in
         # either the explicit cause or implicit exception context.
         if failure:
@@ -143,10 +150,7 @@ class BeadsCli:
             # Completion is ambiguous: never recover/retry a timed-out command.
             raise BeadsError(f"{operation} timed out")
         if result.limit == "output":
-            failure = f"{operation}: output exceeded capture limit"
-            if not read:
-                failure += "; outcome uncertain; read back Beads state before any manual retry."
-            raise BeadsError(failure)
+            raise BeadsError(_uncertain(f"{operation}: output exceeded capture limit", read=read))
         return result
 
     def _run(self, *args: str) -> CommandResult:

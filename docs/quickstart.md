@@ -321,7 +321,10 @@ independently, even if an earlier step fails. An initiating exception, including
 `KeyboardInterrupt`, is re-raised unchanged with a bounded cleanup note containing
 only fixed stage categories. Timeout/output-limit results keep their original
 124/125 status and append the same diagnostic; any cleanup failure after ordinary
-completion raises a command error. Cleanup uncertainty means that owned processes
+completion raises a command error. An interruption (`KeyboardInterrupt` or
+`SystemExit`) caught during cleanup is never converted into a result or command
+error: the remaining stages still run, then it is re-raised with the cleanup
+note (an initiating interruption keeps precedence). Cleanup uncertainty means that owned processes
 or pipe resources may remain; inspect them before retrying. Raw cleanup exception
 messages are never copied into these notes or diagnostics.
 
@@ -363,7 +366,7 @@ raw launch/parse exceptions. These paths do not create a separate diagnostic
 capture; existing runner private logs remain governed by the owned-file policy.
 This policy covers automatic profile-failure and invalid-verdict diagnostics; configured stdout comments with valid markers are intentional publication, and command-mode profiles control their own comments.
 
-Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to 1.5 seconds for output draining and reaping. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync `show` failure triggers automatic import/retry in normal runs. Comment and close failures never trigger recovery/replay; their outcome is uncertain, so read back the issue/comments before any manual retry; other failures stop immediately. Dry-run reads disable import recovery and stop with instructions to run `bd sync --import-only` explicitly before retrying. Dry runs still create/acquire the documented lock files, but never invoke sync, profiles, comment or close. `run.command_timeout_seconds` continues to apply only to profiles.
+Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to 1.5 seconds for output draining and reaping. Timeouts, launch failures and cleanup failures after completion become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync `show` failure triggers automatic import/retry in normal runs. Comment and close failures never trigger recovery/replay; their outcome is uncertain, so read back the issue/comments before any manual retry; other failures stop immediately. Dry-run reads disable import recovery and stop with instructions to run `bd sync --import-only` explicitly before retrying. Dry runs still create/acquire the documented lock files, but never invoke sync, profiles, comment or close. `run.command_timeout_seconds` continues to apply only to profiles.
 
 Internal `bd` output is decoded as strict UTF-8 before JSON admission or recovery
 classification. Malformed/truncated sequences fail with a `BeadsError` naming only

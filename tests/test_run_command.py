@@ -349,7 +349,10 @@ def test_unreapable_child_has_finite_cleanup(outcome: str, monkeypatch: pytest.M
 
 
 def _inject_cleanup_failure(
-    outcome: str, failure: str, monkeypatch: pytest.MonkeyPatch
+    outcome: str,
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+    cleanup_exc: type[BaseException] = OSError,
 ) -> tuple[BaseException, list[str], list[str]]:
     import beadsflow.infra.run_command as module
 
@@ -359,7 +362,7 @@ def _inject_cleanup_failure(
     def record(stage: str) -> None:
         events.append(stage)
         if failure in {stage, "all"}:
-            raise OSError(private)
+            raise cleanup_exc(private)
 
     class Pipe:
         def close(self) -> None:
@@ -445,3 +448,32 @@ def test_cleanup_preserves_primary_and_attempts_remaining_stages(
     assert events[-2:] == ["stdout", "stderr"]
     if outcome != "completed":
         assert "drain" in events
+
+
+@pytest.mark.parametrize(
+    ("outcome", "failure"),
+    [
+        (outcome, failure)
+        for outcome in ["completed", "interrupt", "error", "timeout", "output"]
+        for failure in ["term", "kill", "drain", "wait", "stdout", "stderr"]
+        if (outcome, failure) != ("completed", "drain")
+    ],
+)
+def test_interrupt_during_cleanup_is_reraised_after_remaining_stages(
+    outcome: str, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    primary, events, argv = _inject_cleanup_failure(outcome, failure, monkeypatch, cleanup_exc=KeyboardInterrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        run_command(argv=argv, timeout_seconds=10, env={})
+    if outcome == "interrupt":
+        # The initiating interruption wins over a later one.
+        assert caught.value is primary
+    else:
+        assert caught.value is not primary
+        assert "synthetic-private-detail" in str(caught.value)
+    diagnostic = " ".join(caught.value.__notes__)
+    assert "cleanup incomplete" in diagnostic.lower()
+    assert "synthetic-private-detail" not in diagnostic
+    assert events[0] == "term"
+    assert "kill" in events
+    assert events[-2:] == ["stdout", "stderr"]

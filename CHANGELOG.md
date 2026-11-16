@@ -47,6 +47,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Re-raise an interruption (`KeyboardInterrupt`/`SystemExit`) caught during command cleanup after the remaining stages run instead of converting it into a result or command error. Report cleanup failures after completion as `BeadsError` (with the outcome-uncertain guidance for writes) for internal `bd` commands and as `ZellijError` for Zellij inventory.
+
 - Attempt command retirement, bounded reaping and both stream closes independently when cleanup fails. Preserve initiating exceptions (including interruptions) with bounded, payload-free cleanup notes; keep timeout/output-limit status and refuse ordinary completion after cleanup failures.
 
 - Bound command cleanup and direct-child reaping to a finite allowance on normal and failure paths. Report incomplete cleanup instead of success, preserving timeout/output-limit codes 124/125 with a diagnostic.

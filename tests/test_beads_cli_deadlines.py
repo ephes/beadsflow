@@ -171,3 +171,29 @@ def test_transport_passes_finite_deadline_to_process(tmp_path: Path, monkeypatch
     monkeypatch.setattr(BeadsCli, "_argv", lambda self, *args: [sys.executable, "-c", "print('[]')"])
     assert BeadsCli(str(tmp_path))._run_json("show", "child-1") == []
     assert observed and observed[0] <= 30
+
+
+@pytest.mark.parametrize(("operation", "read"), [("show", True), ("comment", False), ("close", False)])
+def test_cleanup_failure_after_completion_is_beads_error(
+    monkeypatch: pytest.MonkeyPatch, operation: str, read: bool
+) -> None:
+    import beadsflow.infra.beads_cli as module
+    from beadsflow.application.errors import CommandError
+
+    def cleanup_failed(**kwargs: Any) -> CommandResult:
+        raise CommandError("Command cleanup incomplete: direct-child reap failed.")
+
+    monkeypatch.setattr(module, "run_command", cleanup_failed)
+    cli = BeadsCli(".beads")
+    with pytest.raises(BeadsError, match="cleanup incomplete") as caught:
+        if operation == "show":
+            cli.get_issue("child-1")
+        elif operation == "comment":
+            cli.comment("child-1", "synthetic body")
+        else:
+            cli.close("child-1")
+    message = str(caught.value)
+    assert "child-1" in message
+    assert ("outcome uncertain" in message) is not read
+    assert "synthetic body" not in message
+    assert caught.value.__context__ is None
