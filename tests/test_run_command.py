@@ -346,3 +346,102 @@ def test_unreapable_child_has_finite_cleanup(outcome: str, monkeypatch: pytest.M
     assert clock[0] <= 1.5
     assert process.stdout.closed
     assert process.stderr.closed
+
+
+def _inject_cleanup_failure(
+    outcome: str, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> tuple[BaseException, list[str], list[str]]:
+    import beadsflow.infra.run_command as module
+
+    events: list[str] = []
+    private = "synthetic-private-detail\x1b[31m"
+
+    def record(stage: str) -> None:
+        events.append(stage)
+        if failure in {stage, "all"}:
+            raise OSError(private)
+
+    class Pipe:
+        def close(self) -> None:
+            record(self.name)
+
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class Process:
+        args = ["synthetic-command"]
+        returncode: int | None = None
+        stdout = Pipe("stdout")
+        stderr = Pipe("stderr")
+
+        def wait(self, timeout: float | None = None) -> int:
+            assert timeout is not None
+            record("wait")
+            self.returncode = 0
+            return 0
+
+    process = Process()
+    primary: BaseException = {
+        "interrupt": KeyboardInterrupt("initiating interruption"),
+        "timeout": subprocess.TimeoutExpired(process.args, 10),
+        "output": module._OutputLimitExceeded(),
+    }.get(outcome, OSError("initiating read error"))
+    first_drain = True
+
+    def drain(*args: object, **kwargs: object) -> None:
+        nonlocal first_drain
+        if first_drain:
+            first_drain = False
+            if outcome != "completed":
+                raise primary
+        else:
+            record("drain")
+
+    def signal_group(process: object, sig: signal.Signals) -> None:
+        record("term" if sig == signal.SIGTERM else "kill")
+
+    monkeypatch.setattr(module.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(module, "_drain", drain)
+    monkeypatch.setattr(module, "_signal_group", signal_group)
+    return primary, events, process.args
+
+
+@pytest.mark.parametrize(
+    ("outcome", "failure"),
+    [
+        (outcome, failure)
+        for outcome in ["completed", "interrupt", "error", "timeout", "output"]
+        for failure in ["term", "kill", "drain", "wait", "stdout", "stderr", "all"]
+        if (outcome, failure) != ("completed", "drain")
+    ],
+)
+def test_cleanup_preserves_primary_and_attempts_remaining_stages(
+    outcome: str, failure: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from beadsflow.application.errors import CommandError
+
+    primary, events, argv = _inject_cleanup_failure(outcome, failure, monkeypatch)
+    if outcome in {"interrupt", "error"}:
+        with pytest.raises(type(primary)) as caught:
+            run_command(argv=argv, timeout_seconds=10, env={})
+        assert caught.value is primary
+        diagnostic = " ".join(caught.value.__notes__)
+    elif outcome == "completed":
+        with pytest.raises(CommandError) as caught_cleanup:
+            run_command(argv=argv, timeout_seconds=10, env={})
+        diagnostic = str(caught_cleanup.value)
+    else:
+        result = run_command(argv=argv, timeout_seconds=10, env={})
+        assert result.returncode == (124 if outcome == "timeout" else 125)
+        assert result.limit == outcome
+        diagnostic = result.stderr
+    assert "cleanup incomplete" in diagnostic.lower()
+    assert len(diagnostic) < 600
+    assert "synthetic-private-detail" not in diagnostic
+    assert "\x1b" not in diagnostic
+    assert events[0] == "term"
+    assert "kill" in events
+    assert events.index("kill") < events.index("wait")
+    assert events[-2:] == ["stdout", "stderr"]
+    if outcome != "completed":
+        assert "drain" in events

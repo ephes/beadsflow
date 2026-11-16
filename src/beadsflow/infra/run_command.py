@@ -77,14 +77,6 @@ def run_command(
         env={**os.environ, **env},
     )
 
-    def decode(value: bytes, *, strict: bool = False) -> str:
-        if strict:
-            return value.decode("utf-8")
-        if preserve_output:
-            return value.decode("utf-8", errors="surrogateescape")
-        # Profile display output intentionally tolerates malformed bytes.
-        return value.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
-
     output = (bytearray(), bytearray())
     code: int
     notice = ""
@@ -103,20 +95,31 @@ def run_command(
         if not output[1]:
             notice = f"Timed out after {timeout_seconds} seconds."
         notice += cleanup_notice
-    except BaseException:
-        _stop_group(process, output, max_output_bytes)
+    except BaseException as exc:
+        cleanup_notice = _stop_group(process, output, max_output_bytes)
+        if cleanup_notice:
+            exc.add_note(cleanup_notice.strip())
         raise
     else:
-        code = _finish_group(process)
+        code = _finish_group(process, output, max_output_bytes)
     return CommandResult(
         argv=argv,
         returncode=code,
         # Strict admission applies to the stdout of a completed command only; a
         # stopped capture may end mid-character and stderr is diagnostic text.
-        stdout=decode(bytes(output[0]), strict=strict_utf8 and limit is None),
-        stderr=decode(bytes(output[1])) + notice,
+        stdout=_decode_output(bytes(output[0]), preserve_output=preserve_output, strict=strict_utf8 and limit is None),
+        stderr=_decode_output(bytes(output[1]), preserve_output=preserve_output) + notice,
         limit=limit,
     )
+
+
+def _decode_output(value: bytes, *, preserve_output: bool, strict: bool = False) -> str:
+    if strict:
+        return value.decode("utf-8")
+    if preserve_output:
+        return value.decode("utf-8", errors="surrogateescape")
+    # Profile display output intentionally tolerates malformed bytes.
+    return value.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _drain(
@@ -192,53 +195,63 @@ def _signal_group(process: subprocess.Popen[bytes] | subprocess.Popen[str], sig:
             raise PermissionError("Cannot signal owned process group") from None
 
 
-def _finish_group(process: subprocess.Popen[bytes]) -> int:
-    # Keep the exited leader unreaped until the last group signal. Its PID
-    # pins the group identity, even if every descendant has already exited.
-    _signal_group(process, signal.SIGTERM)
-    _signal_group(process, signal.SIGKILL)
-    try:
-        cleanup_notice = _reap(process, time.monotonic() + REAP_SECONDS)
-    finally:
-        if process.stdout is not None:
-            process.stdout.close()
-        if process.stderr is not None:
-            process.stderr.close()
+def _finish_group(process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int) -> int:
+    cleanup_notice = _stop_group(process, output, limit, completed=True)
     if cleanup_notice:
         raise CommandError(cleanup_notice.strip())
     assert process.returncode is not None
     return process.returncode
 
 
-def _reap(process: subprocess.Popen[bytes], deadline: float) -> str:
+def _cleanup_drain(
+    process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int, deadline: float
+) -> str:
     try:
-        process.wait(timeout=max(0, deadline - time.monotonic()))
+        _drain(process, output, min(0.5, max(0, deadline - time.monotonic())), limit, fail_on_overflow=False)
     except subprocess.TimeoutExpired:
-        return "\nCommand cleanup incomplete: direct child could not be reaped within cleanup allowance."
+        # Escaped descendants may retain pipe handles; do not await their EOF.
+        pass
+    except BaseException:
+        return "output drain failed"
     return ""
 
 
-def _stop_group(process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int) -> str:
-    deadline = time.monotonic() + CLEANUP_SECONDS
-    # Cleanup keeps draining under the same cap, never communicating unbounded output.
-    _signal_group(process, signal.SIGTERM)
+def _stop_group(
+    process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int, *, completed: bool = False
+) -> str:
+    deadline = time.monotonic() + (REAP_SECONDS if completed else CLEANUP_SECONDS)
+    issues: list[str] = []
+    # Keep the leader unreaped through the last signal to pin the group identity.
+    # Each stage is independent: even an interruption in cleanup must not skip
+    # escalation, reaping or either owned stream's close attempt.
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            _signal_group(process, sig)
+        except BaseException:
+            issues.append(f"{sig.name} signal failed")
+        if not completed:
+            issue = _cleanup_drain(process, output, limit, deadline)
+            if issue:
+                issues.append(issue)
     try:
-        try:
-            _drain(process, output, min(0.5, max(0, deadline - time.monotonic())), limit, fail_on_overflow=False)
-        except subprocess.TimeoutExpired:
-            _signal_group(process, signal.SIGKILL)
+        process.wait(timeout=max(0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        issues.append("direct child could not be reaped within cleanup allowance")
+    except BaseException:
+        issues.append("direct-child reap failed")
+    issues.extend(_close_pipes(process))
+    if issues:
+        # Fixed stage categories only: never copy external exception text or argv.
+        return "\nCommand cleanup incomplete: " + "; ".join(issues) + "."
+    return ""
+
+
+def _close_pipes(process: subprocess.Popen[bytes]) -> list[str]:
+    issues: list[str] = []
+    for name, pipe in (("stdout", process.stdout), ("stderr", process.stderr)):
+        if pipe is not None:
             try:
-                _drain(process, output, min(0.5, max(0, deadline - time.monotonic())), limit, fail_on_overflow=False)
-            except subprocess.TimeoutExpired:
-                # Escaped descendants may retain pipe handles; do not await their EOF.
-                pass
-    finally:
-        try:
-            _signal_group(process, signal.SIGKILL)
-        finally:
-            cleanup_notice = _reap(process, deadline)
-            if process.stdout is not None:
-                process.stdout.close()
-            if process.stderr is not None:
-                process.stderr.close()
-    return cleanup_notice
+                pipe.close()
+            except BaseException:
+                issues.append(f"{name} close failed")
+    return issues

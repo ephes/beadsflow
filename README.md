@@ -18,7 +18,11 @@ Commands retire their owned process group before returning. Cleanup adds at most
 ordinary completion), including a finite direct-child reap allowance. If the child
 cannot be reaped, ordinary completion raises a command error instead of reporting
 success; timeout/output-limit results retain codes 124/125 and include a cleanup
-uncertainty diagnostic. An escaped descendant is outside the cleanup guarantee.
+uncertainty diagnostic. Signal, drain, reap and both pipe-close stages are attempted
+independently. An initiating exception (including interruption) is re-raised with
+bounded cleanup notes that contain no external exception text. Cleanup failures
+after ordinary completion raise a command error. An escaped descendant is outside
+the cleanup guarantee.
 See the [command contracts](docs/quickstart.md) for details.
 
 ## Dev quickstart

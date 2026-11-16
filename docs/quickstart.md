@@ -316,6 +316,15 @@ Trusted ancestors above those two levels are resolved first, so system aliases s
 
 Runner profile commands on macOS/Linux execute in an owned process group. On timeout, overflow or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and gives the direct command a finite reap allowance. Cleanup adds at most 1.5 seconds, including up to one second of output draining; ordinary completion allows up to 0.5 seconds to reap. If reaping cannot complete, an ordinary completion raises a command error instead of returning success. Timeout/output-limit results retain codes 124/125 and append a cleanup-uncertainty diagnostic; the child may still be alive, so inspect it before retrying. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. On ordinary completion (including a nonzero exit), remaining group members also receive TERM/KILL before the result returns or execution locks are released. The leader stays unreaped until the last signal, preventing process-group ID reuse, and its real exit code/output are preserved when cleanup completes. Commands must not rely on background group members continuing after the leader exits. This applies to runner profiles and the standalone `beadsflow review` helper.
 
+Cleanup attempts TERM, bounded draining, KILL, bounded reaping and each pipe close
+independently, even if an earlier step fails. An initiating exception, including
+`KeyboardInterrupt`, is re-raised unchanged with a bounded cleanup note containing
+only fixed stage categories. Timeout/output-limit results keep their original
+124/125 status and append the same diagnostic; any cleanup failure after ordinary
+completion raises a command error. Cleanup uncertainty means that owned processes
+or pipe resources may remain; inspect them before retrying. Raw cleanup exception
+messages are never copied into these notes or diagnostics.
+
 Runner profiles, standalone reviewer commands and internal Beads commands have a hard 8 MiB combined stdout/stderr
 capture limit per command. Git context/signature commands have a separate 64 MiB cap
 to accommodate large tracked diffs. Dirty trees exceeding the Git cap stop runs/reviews

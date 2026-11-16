@@ -47,6 +47,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Attempt command retirement, bounded reaping and both stream closes independently when cleanup fails. Preserve initiating exceptions (including interruptions) with bounded, payload-free cleanup notes; keep timeout/output-limit status and refuse ordinary completion after cleanup failures.
+
 - Bound command cleanup and direct-child reaping to a finite allowance on normal and failure paths. Report incomplete cleanup instead of success, preserving timeout/output-limit codes 124/125 with a diagnostic.
 
 - Include complete admitted untracked UTF-8 source contents in built-in review context using shared fingerprint path/generation checks and review exclusions. Refuse unsupported or oversized sources before reviewer launch. Preserve patch trailing whitespace and require the complete tracked/untracked patch to fit the positive patch budget; clipped evidence can no longer produce helper approval or runner approval evidence.
