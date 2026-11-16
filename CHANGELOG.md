@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Fence untracked fingerprints and review sources against ancestor-directory replacement, retaining descriptors and rechecking named identities from the resolved worktree root through the leaf parent before returning evidence.
 - Require strict UTF-8 for internal bd responses before JSON admission, preserving valid split multibyte output and tolerant profile display decoding. Redact raw stdout/stderr and launch/parse exception chains from standalone reviewer and bd errors, including import/retry failures; expose only bounded operation/exit/category diagnostics.
 - Render tracked review patches as text (`git diff --text`), so binary-classified content or a `-diff` attribute can no longer hide a change behind `Binary files … differ`. Tracked patches keep raw bytes (including carriage returns) and follow the untracked-source policy: invalid UTF-8 or NUL content refuses the review before reviewer launch. Strict bd UTF-8 admission now covers stdout of completed commands only; timeouts/output caps report as such, non-UTF-8 stderr no longer fails a command, and malformed comment/close output names the operation and the uncertain-outcome readback instruction.
 

@@ -1,6 +1,7 @@
 import logging
 import os
 import socket
+import stat
 import subprocess
 from pathlib import Path
 
@@ -168,7 +169,8 @@ def test_untracked_file_replacement_is_refused(
     def fstat(fd: int) -> os.stat_result:
         nonlocal fstats
         result = original_fstat(fd)
-        fstats += 1
+        if stat.S_ISREG(result.st_mode):
+            fstats += 1
         if fstats == 2 and boundary == "after_final_fstat":
             replace()
         return result
@@ -212,6 +214,77 @@ def test_untracked_symlink_replacement_is_refused(
         signatures.untracked_signature(tmp_path, path.name)
     assert replaced
     assert original_readlink(path) == target
+
+
+@pytest.mark.parametrize("consumer", ["signature", "source"])
+@pytest.mark.parametrize("ancestor", ["root", "direct", "intermediate"])
+@pytest.mark.parametrize("substitution", ["directory", "symlink"])
+@pytest.mark.parametrize("boundary", ["after_open", "after_read"])
+def test_untracked_ancestor_replacement_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    consumer: str,
+    ancestor: str,
+    substitution: str,
+    boundary: str,
+) -> None:
+    from collections.abc import Iterator
+
+    import beadsflow.infra.git_signature as signatures
+
+    root = tmp_path / "worktree"
+    path = root / "outer" / "inner" / "entry"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"reviewed")
+    parent = {"root": root, "direct": path.parent, "intermediate": path.parent.parent}[ancestor]
+    moved = tmp_path / "detached"
+    replaced = False
+    original_open = os.open
+    original_chunks = signatures._regular_chunks
+
+    def replace_parent() -> None:
+        nonlocal replaced
+        parent.rename(moved)
+        if substitution == "symlink":
+            parent.symlink_to(moved, target_is_directory=True)
+        else:
+            replacement = parent / path.relative_to(parent)
+            replacement.parent.mkdir(parents=True)
+            replacement.write_bytes(b"replacement")
+        replaced = True
+
+    def open_entry(name: str | Path, flags: int, *, dir_fd: int | None = None) -> int:
+        fd = original_open(name, flags, dir_fd=dir_fd)
+        if boundary == "after_open" and name == "entry":
+            replace_parent()
+        return fd
+
+    def chunks(
+        directory: int, name: str, metadata: os.stat_result, budget: signatures.FingerprintBudget
+    ) -> Iterator[bytes]:
+        yield from original_chunks(directory, name, metadata, budget)
+        if boundary == "after_read":
+            replace_parent()
+
+    monkeypatch.setattr(signatures.os, "open", open_entry)
+    monkeypatch.setattr(signatures, "_regular_chunks", chunks)
+    with pytest.raises(CommandError, match="ancestor changed.*fingerprint"):
+        if consumer == "signature":
+            signatures.untracked_signature(root, "outer/inner/entry")
+        else:
+            signatures.untracked_source(root, "outer/inner/entry", budget=signatures.FingerprintBudget.start())
+    assert replaced
+    assert path.read_bytes() == (b"reviewed" if substitution == "symlink" else b"replacement")
+
+
+def test_unchanged_nested_untracked_evidence(tmp_path: Path) -> None:
+    from beadsflow.infra.git_signature import FingerprintBudget, untracked_signature, untracked_source
+
+    path = tmp_path / "outer" / "inner" / "entry"
+    path.parent.mkdir(parents=True)
+    path.write_text("reviewed")
+    assert untracked_signature(tmp_path, "outer/inner/entry") == untracked_signature(tmp_path, "outer/inner/entry")
+    assert untracked_source(tmp_path, "outer/inner/entry", budget=FingerprintBudget.start()) == "reviewed"
 
 
 def test_carriage_return_name_is_not_confused_with_newline_name(loop: EpicRunLoop) -> None:
