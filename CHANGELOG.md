@@ -8,6 +8,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Refuse unsupported untracked fingerprint entries (directories, including untracked nested repositories, FIFOs, sockets and other special files) before opening them; mode-only evidence can no longer pass review or close fences.
+- Bind untracked regular-file fingerprints to matching pre-open, opened and final named generations, and fence symlink target reads with before/after metadata checks. Detected replacements, including identical-content replacements, fail without automatic retry.
+
 - Admit config files through one nonblocking regular descriptor with a 64 KiB limit, bounded reads and a 64-level decoded nesting limit; refuse detected changes/growth and normalize UTF-8/TOML depth/resource errors before automation. Missing optional default configs retain their behavior.
 - Reject duplicate JSON members at every level of Beads responses and enforce a 64-level decoded nesting limit on every Python version, and normalize decoder value/depth/resource failures to payload-free errors without retry or downstream automation.
 

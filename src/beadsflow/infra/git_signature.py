@@ -57,6 +57,17 @@ def untracked_signature(root: Path, relative: str, *, budget: FingerprintBudget 
         os.close(directory)
 
 
+def _generation(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
 def _entry_signature(directory: int, name: str, budget: FingerprintBudget) -> bytes:
     metadata = os.stat(name, dir_fd=directory, follow_symlinks=False)
     digest = hashlib.sha256()
@@ -67,9 +78,11 @@ def _entry_signature(directory: int, name: str, budget: FingerprintBudget) -> by
     elif stat.S_ISREG(metadata.st_mode):
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
         with os.fdopen(fd, "rb", buffering=0) as handle:
-            metadata = os.fstat(handle.fileno())
-            if not stat.S_ISREG(metadata.st_mode):
-                raise CommandError(f"Untracked path is not a regular file or symlink: {name}")
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode):
+                raise CommandError(f"Untracked path is not a regular file or symlink: {name[:120]!r}")
+            if _generation(metadata) != _generation(opened):
+                raise CommandError("Untracked file changed during fingerprinting")
             budget.reserve(metadata.st_size)
             remaining = metadata.st_size
             while remaining:
@@ -80,12 +93,12 @@ def _entry_signature(directory: int, name: str, budget: FingerprintBudget) -> by
                 digest.update(chunk)
                 remaining -= len(chunk)
             after = os.fstat(handle.fileno())
-            if (metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns, metadata.st_mode) != (
-                after.st_size,
-                after.st_mtime_ns,
-                after.st_ctime_ns,
-                after.st_mode,
-            ):
+            if _generation(metadata) != _generation(after):
                 raise CommandError("Untracked file changed during fingerprinting")
+    else:
+        raise CommandError(f"Untracked path is not a regular file or symlink: {name[:120]!r}")
+    named_after = os.stat(name, dir_fd=directory, follow_symlinks=False)
+    if _generation(metadata) != _generation(named_after):
+        raise CommandError("Untracked file changed during fingerprinting")
     budget.check()
     return str(metadata.st_mode).encode("ascii") + b":" + digest.digest()

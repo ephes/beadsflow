@@ -1,5 +1,6 @@
 import logging
 import os
+import socket
 import subprocess
 from pathlib import Path
 
@@ -93,25 +94,123 @@ def test_unicode_untracked_name(loop: EpicRunLoop) -> None:
     assert loop._git_signature() != before
 
 
-def test_nested_repository_and_fifo(loop: EpicRunLoop) -> None:
+def test_nested_repository_is_not_reviewable(loop: EpicRunLoop) -> None:
+    from beadsflow.application.errors import CommandError
+
     root = loop.repo_paths.repo_root
     nested = root / "nested"
     nested.mkdir()
     git(nested, "init")
-    fifo = root / "fifo"
-    os.mkfifo(fifo)
-    # Explicit start modes: the mode changes below must not depend on the umask.
-    nested.chmod(0o755)
-    fifo.chmod(0o644)
-    before = loop._git_signature()
-    assert loop._git_signature() == before
-    nested.chmod(0o700)
-    assert loop._git_signature() != before
-    from beadsflow.infra.git_signature import untracked_signature
+    with pytest.raises(CommandError, match="not a regular file or symlink"):
+        loop._git_signature()
 
-    special = untracked_signature(root, "fifo")
-    fifo.chmod(0o600)
-    assert untracked_signature(root, "fifo") != special
+
+@pytest.mark.parametrize("kind", ["directory", "fifo", "socket"])
+def test_unsupported_entry_is_refused_without_opening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    import beadsflow.infra.git_signature as signatures
+    from beadsflow.application.errors import CommandError
+
+    path = tmp_path / "unsupported"
+    monkeypatch.chdir(tmp_path)  # Keep the AF_UNIX address below the platform length limit.
+    with socket.socket(socket.AF_UNIX) as listener:
+        if kind == "directory":
+            path.mkdir()
+        elif kind == "fifo":
+            os.mkfifo(path)
+        else:
+            listener.bind(path.name)
+        directory = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+
+            def refuse_open(*args: object, **kwargs: object) -> int:
+                pytest.fail("Unsupported entry must never be opened")
+
+            monkeypatch.setattr(signatures.os, "open", refuse_open)
+            with pytest.raises(CommandError, match="not a regular file or symlink"):
+                signatures._entry_signature(directory, path.name, signatures.FingerprintBudget.start())
+        finally:
+            os.close(directory)
+
+
+@pytest.mark.parametrize("boundary", ["before_open", "after_open", "after_final_fstat"])
+@pytest.mark.parametrize("same_content", [False, True])
+def test_untracked_file_replacement_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str, same_content: bool
+) -> None:
+    import beadsflow.infra.git_signature as signatures
+    from beadsflow.application.errors import CommandError
+
+    path = tmp_path / "entry"
+    path.write_bytes(b"original")
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(b"original" if same_content else b"new data")
+    original_open = os.open
+    original_fstat = os.fstat
+    replaced = False
+    fstats = 0
+
+    def replace() -> None:
+        nonlocal replaced
+        os.replace(replacement, path)
+        replaced = True
+
+    def open_entry(name: str | Path, flags: int, *, dir_fd: int | None = None) -> int:
+        if name == path.name and boundary == "before_open":
+            replace()
+        fd = original_open(name, flags, dir_fd=dir_fd)
+        if name == path.name and boundary == "after_open":
+            replace()
+        return fd
+
+    def fstat(fd: int) -> os.stat_result:
+        nonlocal fstats
+        result = original_fstat(fd)
+        fstats += 1
+        if fstats == 2 and boundary == "after_final_fstat":
+            replace()
+        return result
+
+    monkeypatch.setattr(signatures.os, "open", open_entry)
+    monkeypatch.setattr(signatures.os, "fstat", fstat)
+    with pytest.raises(CommandError, match="changed.*fingerprint"):
+        signatures.untracked_signature(tmp_path, path.name)
+    assert replaced
+    assert path.read_bytes() == (b"original" if same_content else b"new data")
+
+
+@pytest.mark.parametrize("boundary", ["before_readlink", "after_readlink"])
+@pytest.mark.parametrize("same_target", [False, True])
+def test_untracked_symlink_replacement_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str, same_target: bool
+) -> None:
+    import beadsflow.infra.git_signature as signatures
+    from beadsflow.application.errors import CommandError
+
+    path = tmp_path / "entry"
+    path.symlink_to("original")
+    replacement = tmp_path / "replacement"
+    target = "original" if same_target else "new data"
+    replacement.symlink_to(target)
+    original_readlink = os.readlink
+    replaced = False
+
+    def readlink(name: str, *, dir_fd: int | None = None) -> str:
+        nonlocal replaced
+        if boundary == "before_readlink":
+            os.replace(replacement, path)
+        result = original_readlink(name, dir_fd=dir_fd)
+        if boundary == "after_readlink":
+            os.replace(replacement, path)
+        replaced = True
+        return result
+
+    monkeypatch.setattr(signatures.os, "readlink", readlink)
+    with pytest.raises(CommandError, match="changed.*fingerprint"):
+        signatures.untracked_signature(tmp_path, path.name)
+    assert replaced
+    assert original_readlink(path) == target
 
 
 def test_carriage_return_name_is_not_confused_with_newline_name(loop: EpicRunLoop) -> None:

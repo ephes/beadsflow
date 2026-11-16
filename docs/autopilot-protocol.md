@@ -139,6 +139,13 @@ including tracked JSONL exports written by command-mode comments; the rest of th
 entire worktree is covered, including outside a nested project root. Changed HEAD, tracked/staged patches or untracked content/modes stop
 publication and phase acceptance without undoing edits or closing the issue. A
 safe refusal comment is attempted and a private log preserves the reason and rejected output.
+Untracked fingerprints admit only regular files and symlinks; reported directories
+(including untracked nested repositories), FIFOs, sockets and other special files
+fail the signature. Regular files must match their pre-open, opened and final
+named generation; symlink metadata must remain unchanged across `readlink`.
+Detected replacements or mutations invalidate the evidence without automatic
+retry, even when the replacement has identical content. Stabilize the worktree
+before explicitly rerunning review.
 Ignored files and transient changes restored before a signature check are outside
 this guarantee. After an unchanged approval, the runner appends its combined Git and issue-requirements
 evidence as a new approval comment. This is a content freshness check, not
