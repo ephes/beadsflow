@@ -15,6 +15,7 @@ class _Completed:
     returncode: int
     stdout: str = ""
     stderr: str = ""
+    limit: str | None = None
 
 
 def test_beads_cli_auto_imports_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) -> None:

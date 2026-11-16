@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import sys
 
@@ -80,3 +81,19 @@ def test_profile_output_keeps_lenient_utf8_decoding() -> None:
         argv=[sys.executable, "-c", "import os; os.write(1,b'profile\\xff')"], timeout_seconds=3, env={}
     )
     assert result.stdout == "profile\ufffd"
+
+
+@pytest.mark.parametrize("operation", ["show", "close"])
+def test_bd_output_cap_is_reported_as_cap(monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
+    import beadsflow.infra.beads_cli as beads_cli
+
+    script = "import os; os.write(1, b'x' * 63 + b'\\xe9' * 64)"
+    monkeypatch.setattr(BeadsCli, "_argv", lambda self, *args: [sys.executable, "-c", script])
+    monkeypatch.setattr(beads_cli, "run_command", functools.partial(run_command, max_output_bytes=64))
+    cli = BeadsCli(".beads")
+    with pytest.raises(BeadsError, match="output exceeded capture limit") as excinfo:
+        if operation == "show":
+            cli.get_issue("child")
+        else:
+            cli.close("child")
+    assert ("outcome uncertain" in str(excinfo.value)) == (operation == "close")

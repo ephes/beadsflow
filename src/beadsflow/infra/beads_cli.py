@@ -139,9 +139,14 @@ class BeadsCli:
         if failure:
             raise BeadsError(failure)
         assert result is not None
-        if result.returncode == 124:
+        if result.limit == "timeout" or result.returncode == 124:
             # Completion is ambiguous: never recover/retry a timed-out command.
             raise BeadsError(f"{operation} timed out")
+        if result.limit == "output":
+            failure = f"{operation}: output exceeded capture limit"
+            if not read:
+                failure += "; outcome uncertain; read back Beads state before any manual retry."
+            raise BeadsError(failure)
         return result
 
     def _run(self, *args: str) -> CommandResult:
