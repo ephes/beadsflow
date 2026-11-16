@@ -44,6 +44,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Recheck child readiness and current epic membership after close-signature collection; defer changed intent without closing or superseding approval. Limit out-of-sync import/replay to reads; uncertain comment/close writes require explicit state readback before retry.
+
 - Refuse standalone reviewer prompts above 64 KiB of complete UTF-8 context before launch, including issue requirements and Git status/stat; invalid UTF-8/NUL contexts also fail without a comment or approval.
 - Preserve dependent relationship types and admit only explicit parent-child work into epic selection/completion. Ambiguous reverse edge types fail closed; ordinary external blockers still gate owned children.
 

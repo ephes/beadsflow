@@ -134,7 +134,7 @@ def test_expired_recovery_budget_does_not_launch_retry(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(module, "run_command", run)
     with pytest.raises(BeadsError, match="timed out"):
-        BeadsCli(".beads", command_timeout_seconds=1).close("child-1")
+        BeadsCli(".beads", command_timeout_seconds=1).get_issue("child-1")
     assert len(calls) == 2
 
 

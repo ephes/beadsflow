@@ -181,3 +181,13 @@ iteration follows the new verdict.
 Old Git-only approval evidence is stale and requires a fresh review. This remains
 a freshness check, not author authentication; edits restored between checks and
 external writes after the final check are outside this guarantee.
+
+Before automatic close, after collecting the Git signature, the runner rechecks
+current child readiness and reads the epic again to confirm explicit parent-child
+membership. A blocked/closed child, reopened blocker, removed child or changed
+relationship defers work to the next selection pass without publishing a verdict
+or closing. These reads do not lock out subsequent external Beads edits.
+
+Automatic out-of-sync import/replay is restricted to `bd show`. Mutations are
+never replayed automatically: a failed comment/close may already have applied.
+Read back issue status/comments before any explicit recovery or manual retry.

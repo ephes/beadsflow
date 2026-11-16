@@ -136,8 +136,8 @@ class EpicRunLoop:
         phase = next_work.phase
         approval = self._approval_state(selected) if phase is Phase.CLOSE else "current"
         if approval == "superseded":
-            # A reviewer acted after selection; honor the new verdict next iteration.
-            self.logger.info(f"Review verdict for {selected.id} changed during approval check; re-evaluating.")
+            # Readiness, membership or verdict changed; select again next iteration.
+            self.logger.info(f"Close intent for {selected.id} changed during approval check; re-evaluating.")
             return None
         stale_approval = approval == "stale"
         if stale_approval:
@@ -294,8 +294,15 @@ class EpicRunLoop:
             # Legacy/manual approvals never need Git (dry runs stay Git-free).
             return "stale"
         signature = self._git_signature(exclude_beads=True)
-        # Git collection can take time: re-read requirements and verdict afterwards.
+        # Git collection can take time: revalidate close intent afterwards.
         current = self.beads.get_issue(issue.id)
+        if not self._is_child_ready(current):
+            return "superseded"
+        epic = self.beads.get_issue(self.epic_id)
+        if epic.issue_type is not IssueType.EPIC or not any(
+            child.id == current.id and child.dependency_type == "parent-child" for child in epic.dependents
+        ):
+            return "superseded"
         latest = _latest_marker_comment(current)
         if latest is None or marker_from_text(latest.text) is not Marker.LGTM:
             return "superseded"

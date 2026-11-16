@@ -142,6 +142,10 @@ class BeadsCli:
         operation = "bd " + shlex.join(arg[:200] for arg in diagnostic_args[:count])
         completed = self._execute(argv, deadline=deadline, operation=operation)
         if completed.returncode != 0 and self._is_db_out_of_sync(completed.stderr):
+            # Only this public read is safe to replay. Writes may have committed
+            # before reporting failure; importing cannot prove otherwise.
+            if diagnostic_args[0] != "show":
+                raise BeadsError(f"{operation}: outcome uncertain; read back Beads state before any manual retry.")
             if not self.auto_sync:
                 raise BeadsError(
                     f"{operation}: database out of sync; dry-run will not import. "

@@ -560,3 +560,46 @@ def test_verdict_changed_during_close_check_is_not_overridden(
     assert replace(loop, reviewer_name=None).run(once=True, dry_run=False, max_iterations=1) == 0
     assert loop.beads.closed == []  # type: ignore[attr-defined]
     assert loop.beads.comments[-1].text == "Changes requested: synthetic late verdict"  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("change", ["blocked", "closed", "dependency-reopened", "detached", "reassociated"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_close_rechecks_readiness_and_membership_after_git_collection(
+    review_loop: EpicRunLoop, monkeypatch: pytest.MonkeyPatch, change: str, dry_run: bool
+) -> None:
+    from beadsflow.domain.models import Dependency
+
+    original_issue = Beads.get_issue
+    changed = False
+
+    def issue(self: Beads, issue_id: str) -> Issue:
+        current = original_issue(self, issue_id)
+        if issue_id == "child":
+            current = replace(current, dependencies=[Dependency("blocker", IssueStatus.CLOSED)])
+            if changed and change in {"blocked", "closed"}:
+                current = replace(current, status=IssueStatus(change))
+            if changed and change == "dependency-reopened":
+                current = replace(current, dependencies=[Dependency("blocker", IssueStatus.OPEN)])
+        elif changed and change in {"detached", "reassociated"}:
+            current = replace(
+                current,
+                dependents=[] if change == "detached" else [replace(current.dependents[0], dependency_type="related")],
+            )
+        return current
+
+    monkeypatch.setattr(Beads, "get_issue", issue)
+    loop = with_script(review_loop, "print('LGTM')")
+    assert loop.run(once=True, dry_run=False, max_iterations=1) == 0
+    comments = list(loop.beads.comments)  # type: ignore[attr-defined]
+    original_signature = EpicRunLoop._git_signature
+
+    def signature(self: EpicRunLoop, *, exclude_beads: bool = False) -> str:
+        nonlocal changed
+        result = original_signature(self, exclude_beads=exclude_beads)
+        changed = True
+        return result
+
+    monkeypatch.setattr(EpicRunLoop, "_git_signature", signature)
+    assert replace(loop, reviewer_name=None).run(once=True, dry_run=dry_run, max_iterations=1) == 0
+    assert loop.beads.closed == []  # type: ignore[attr-defined]
+    assert loop.beads.comments == comments  # type: ignore[attr-defined]

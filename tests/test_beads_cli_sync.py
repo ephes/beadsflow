@@ -73,31 +73,34 @@ def test_beads_cli_auto_imports_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) 
     assert any(argv[:3] == ["bd", "--no-daemon", "sync"] for argv in calls)
 
 
-def test_beads_cli_comment_retries_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) -> None:
-    import beadsflow.infra.beads_cli as beads_cli_mod
+@pytest.mark.parametrize("mutation", ["comment", "close"])
+def test_uncertain_mutation_is_not_recovered_or_replayed(monkeypatch: pytest.MonkeyPatch, mutation: str) -> None:
+    import beadsflow.infra.beads_cli as module
+    from beadsflow.application.errors import BeadsError
 
     calls: list[list[str]] = []
-    comment_calls = 0
+    applied: list[str] = []
 
     def run(*, argv: list[str], **kwargs: object) -> _Completed:
-        nonlocal comment_calls
         calls.append(argv)
-        if argv[:4] == ["bd", "--no-daemon", "comments", "add"]:
-            comment_calls += 1
-            if comment_calls == 1:
-                return _Completed(returncode=1, stderr="Error: Database out of sync with JSONL.")
-            return _Completed(returncode=0)
-        if argv[:3] == ["bd", "--no-daemon", "sync"] and "--import-only" in argv:
-            return _Completed(returncode=0)
-        raise AssertionError(f"Unexpected argv: {argv}")
+        if "show" in argv:
+            return _Completed(0, stdout=json.dumps(applied))
+        if "sync" in argv:
+            return _Completed(0)
+        applied.append(mutation)
+        return _Completed(1, stderr="Database out of sync with JSONL")
 
-    monkeypatch.setattr(beads_cli_mod, "run_command", run)
-
-    cli = BeadsCli(beads_dir=".beads")
-    cli.comment("beadsflow-2", "hello")
-
-    assert comment_calls == 2
-    assert any(argv[:3] == ["bd", "--no-daemon", "sync"] for argv in calls)
+    monkeypatch.setattr(module, "run_command", run)
+    cli = BeadsCli(".beads")
+    with pytest.raises(BeadsError, match="uncertain.*read back"):
+        if mutation == "comment":
+            cli.comment("child", "synthetic comment")
+        else:
+            cli.close("child")
+    assert len(calls) == 1
+    assert applied == [mutation]
+    assert cli._run_json("show", "child") == [mutation]
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("operation", ["show", "comment", "close"])
@@ -129,14 +132,15 @@ def test_beads_cli_recovery_failures_are_bounded(
             cli.comment("child-1", "synthetic")
         else:
             cli.close("child-1")
-    assert len(calls) == {"command": 1, "sync": 2, "retry": 3}[failure]
+    assert len(calls) == ({"command": 1, "sync": 2, "retry": 3}[failure] if operation == "show" else 1)
     expected_operation = {
         "show": "bd show child-1",
         "comment": "bd comments add child-1",
         "close": "bd close child-1",
     }[operation]
     assert expected_operation in str(caught.value)
-    assert "synthetic failure" in str(caught.value)
+    if operation == "show" or failure == "command":
+        assert "synthetic failure" in str(caught.value)
     assert len(str(caught.value)) < 1100
 
 
