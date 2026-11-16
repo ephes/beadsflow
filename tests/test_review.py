@@ -198,7 +198,7 @@ def test_reviewer_success_and_failure() -> None:
         _run_reviewer_command(cli_command=command + shlex.quote("print('LGTM')"), prompt_arg="-p", prompt="test")
         == "LGTM\n"
     )
-    with pytest.raises(CommandError, match="exit 3.*broken"):
+    with pytest.raises(CommandError, match="exit 3"):
         _run_reviewer_command(
             cli_command=command + shlex.quote("import sys; print('broken', file=sys.stderr); sys.exit(3)"),
             prompt_arg="-p",

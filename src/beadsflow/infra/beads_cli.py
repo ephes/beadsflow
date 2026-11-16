@@ -124,10 +124,19 @@ class BeadsCli:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise BeadsError(f"{operation} timed out")
+        result = None
+        failure = ""
         try:
-            result = run_command(argv=argv, timeout_seconds=remaining, env=self._env())
+            result = run_command(argv=argv, timeout_seconds=remaining, env=self._env(), strict_utf8=True)
+        except UnicodeDecodeError:
+            failure = "Invalid UTF-8 from bd"
         except OSError as exc:
-            raise BeadsError(f"Cannot execute {operation} ({type(exc).__name__})") from exc
+            failure = f"Cannot execute {operation} ({type(exc).__name__})"
+        # Raise outside the handler: raw external errors must not survive in
+        # either the explicit cause or implicit exception context.
+        if failure:
+            raise BeadsError(failure)
+        assert result is not None
         if result.returncode == 124:
             # Completion is ambiguous: never recover/retry a timed-out command.
             raise BeadsError(f"{operation} timed out")
@@ -158,10 +167,13 @@ class BeadsCli:
                 operation=recovery_operation,
             )
             if sync.returncode != 0:
-                raise BeadsError(f"{recovery_operation} failed: {sync.stderr.strip()[:1000]}")
+                raise BeadsError(f"{recovery_operation} failed (exit {sync.returncode})")
             completed = self._execute(argv, deadline=deadline, operation=operation)
         if completed.returncode != 0:
-            raise BeadsError(f"{operation} failed ({completed.returncode}): {completed.stderr.strip()[:1000]}")
+            failure = f"{operation} failed (exit {completed.returncode})"
+            if diagnostic_args[0] != "show":
+                failure += "; outcome uncertain; read back Beads state before any manual retry."
+            raise BeadsError(failure)
         return completed
 
     def _run_json(self, *args: str) -> Any:
@@ -170,8 +182,9 @@ class BeadsCli:
             data = json.loads(completed.stdout, object_pairs_hook=_unique_object)
             _validate_json_depth(data)
             return data
-        except (ValueError, RecursionError, MemoryError) as exc:
-            raise BeadsError("Invalid JSON from bd") from exc
+        except (ValueError, RecursionError, MemoryError):
+            pass
+        raise BeadsError("Invalid JSON from bd")
 
     def get_issue(self, issue_id: str) -> Issue:
         data = self._run_json("show", issue_id)
@@ -184,7 +197,8 @@ class BeadsCli:
             return issue
         except (KeyError, TypeError, ValueError, OverflowError) as exc:
             # Never echo malformed field values or whole external payloads.
-            raise BeadsError(f"Invalid bd show payload for {issue_id[:200]} ({type(exc).__name__})") from exc
+            category = type(exc).__name__
+        raise BeadsError(f"Invalid bd show payload for {issue_id[:200]} ({category})")
 
     def comment(self, issue_id: str, text: str) -> None:
         self._run("comments", "add", issue_id, text)

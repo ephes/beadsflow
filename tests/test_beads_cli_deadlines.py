@@ -108,7 +108,7 @@ def test_recovery_shares_original_deadline(monkeypatch: pytest.MonkeyPatch) -> N
     timeouts: list[float] = []
     monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
 
-    def run(*, argv: list[str], timeout_seconds: float, env: dict[str, str]) -> CommandResult:
+    def run(*, argv: list[str], timeout_seconds: float, env: dict[str, str], **kwargs: Any) -> CommandResult:
         timeouts.append(timeout_seconds)
         clock[0] += 0.25
         if len(timeouts) == 1:

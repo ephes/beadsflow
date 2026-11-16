@@ -8,6 +8,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Require strict UTF-8 for internal bd responses before JSON admission, preserving valid split multibyte output and tolerant profile display decoding. Redact raw stdout/stderr and launch/parse exception chains from standalone reviewer and bd errors, including import/retry failures; expose only bounded operation/exit/category diagnostics.
+
 - Refuse unsupported untracked fingerprint entries (directories, including untracked nested repositories, FIFOs, sockets and other special files) before opening them; mode-only evidence can no longer pass review or close fences.
 - Bind untracked regular-file fingerprints to matching pre-open, opened and final named generations, and fence symlink target reads with before/after metadata checks. Detected replacements, including identical-content replacements, fail without automatic retry.
 
@@ -44,7 +46,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
-- Include complete admitted untracked UTF-8 source contents in built-in review context using shared fingerprint path/generation checks and review exclusions. Refuse unsupported or oversized sources before reviewer launch. Require the complete tracked/untracked patch to fit the positive patch budget; clipped evidence can no longer produce helper approval or runner approval evidence.
+- Include complete admitted untracked UTF-8 source contents in built-in review context using shared fingerprint path/generation checks and review exclusions. Refuse unsupported or oversized sources before reviewer launch. Preserve patch trailing whitespace and require the complete tracked/untracked patch to fit the positive patch budget; clipped evidence can no longer produce helper approval or runner approval evidence.
 
 - Recheck child readiness and current epic membership after close-signature collection; defer changed intent without closing or superseding approval. Limit out-of-sync import/replay to reads; uncertain comment/close writes require explicit state readback before retry.
 

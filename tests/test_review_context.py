@@ -116,3 +116,12 @@ def test_complete_patch_at_limit_can_approve(review_tree: Path, monkeypatch: pyt
     assert review.run_review(request(size)) == "LGTM"
     with pytest.raises(CommandError, match="complete.*patch"):
         review.run_review(request(size - 1))
+
+
+def test_complete_patch_preserves_final_added_line_whitespace(review_tree: Path) -> None:
+    path = review_tree / "tracked.py"
+    path.write_text("before\n")
+    subprocess.run(["git", "add", "tracked.py"], check=True, capture_output=True)
+    path.write_text("synthetic-trailing  \n")
+    patch = review._collect_git_context(8000)[2]
+    assert "+synthetic-trailing  \n" in patch

@@ -139,8 +139,7 @@ def test_beads_cli_recovery_failures_are_bounded(
         "close": "bd close child-1",
     }[operation]
     assert expected_operation in str(caught.value)
-    if operation == "show" or failure == "command":
-        assert "synthetic failure" in str(caught.value)
+    assert "synthetic failure" not in str(caught.value)
     assert len(str(caught.value)) < 1100
 
 

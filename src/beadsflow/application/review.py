@@ -77,7 +77,7 @@ def _format_comment(comment: Comment | None, max_bytes: int) -> str:
 
 def _run_git(args: list[str], *, cwd: Path | None = None) -> str:
     # Review prompts are display text; signatures keep the byte-preserving default.
-    return capture_git(args, cwd=cwd, preserve_output=False).strip()
+    return capture_git(args, cwd=cwd, preserve_output=False)
 
 
 def _format_git_sections(unstaged: str, staged: str) -> str:
@@ -207,19 +207,21 @@ def _run_reviewer_command(
     argv = [*argv, prompt_arg, prompt]
     if timeout_seconds <= 0:
         raise CommandError("Review timeout must be a positive number of seconds")
+    completed = None
+    failure = ""
     try:
         completed = run_command(argv=argv, timeout_seconds=timeout_seconds, env={})
     except OSError as exc:
-        raise CommandError(f"Cannot execute reviewer command ({type(exc).__name__})") from exc
+        failure = f"Cannot execute reviewer command ({type(exc).__name__})"
+    if failure:
+        raise CommandError(failure)
+    assert completed is not None
     if completed.limit == "timeout":
         raise CommandError(f"Reviewer command timed out after {timeout_seconds} seconds")
     if completed.limit == "output":
         raise CommandError(f"Reviewer command failed (exit 125): output exceeded {DEFAULT_MAX_OUTPUT_BYTES} bytes")
     if completed.returncode != 0:
-        stderr = (completed.stderr or "").strip()
-        stdout = (completed.stdout or "").strip()
-        detail = stderr or stdout or "unknown error"
-        raise CommandError(f"Reviewer command failed (exit {completed.returncode}): {detail}")
+        raise CommandError(f"Reviewer command failed (exit {completed.returncode})")
     return completed.stdout or ""
 
 

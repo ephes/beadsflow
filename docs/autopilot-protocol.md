@@ -201,3 +201,10 @@ patch/source sections. Overflow refuses the review, rather than accepting an
 published. Comment previews may still be truncated, and the 64 KiB complete
 prompt admission remains in force. Custom reviewer profiles must provide their
 own complete review context.
+
+Internal `bd` responses require strict UTF-8 before JSON admission; malformed byte
+sequences cannot change accepted issue/comment evidence through replacement
+characters. Profiles retain tolerant display decoding. Standalone reviewer and
+`bd` failure diagnostics expose bounded operation/exit/category metadata only,
+including recovery and launch/parse failures. Raw output and external exception
+chains are omitted; no separate private capture is created on these paths.

@@ -106,7 +106,7 @@ of the patch limit and 64 KiB prompt limit. Track or ignore unsupported files
 deliberately before retrying.
 
 The complete patch and source sections must fit the positive `--diff-max-bytes`
-limit (default 8000); they are never clipped into an approval-capable review.
+limit (default 8000); trailing patch whitespace is preserved and patches are never clipped into an approval-capable review.
 Overflow stops before reviewer launch and prints no review comment. Reduce the
 slice or raise the patch limit within the complete prompt budget. Comment bodies
 have a separate byte limit; comment truncation preserves UTF-8 and adds a notice
@@ -344,9 +344,20 @@ directory. No failed log path is published. Inspect and remove these artifacts
 manually, including in a renamed directory; retries create a new unique file.
 If a log cannot be written safely, beadsflow still reports the original profile failure
 and posts its failure comment without a log path. Normal and dry-run progress messages omit profile arguments. Commands can still print
-sensitive output. Automatic runner failure comments and default console errors contain only trusted phase/exit or verdict-validation diagnostics and a private log reference; they never include raw stdout/stderr excerpts. Invalid, empty or verdict-changing truncated stdout is likewise logged privately instead of copied into a failure comment. If a comment cannot be posted, only the exception type is logged and the primary failure remains the outcome. Read the referenced local log for details. This policy covers automatic profile-failure and invalid-verdict diagnostics; configured stdout comments with valid markers are intentional publication, and command-mode profiles control their own comments.
+sensitive output. Automatic runner failure comments and default console errors contain only trusted phase/exit or verdict-validation diagnostics and a private log reference; they never include raw stdout/stderr excerpts. Invalid, empty or verdict-changing truncated stdout is likewise logged privately instead of copied into a failure comment. If a comment cannot be posted, only the exception type is logged and the primary failure remains the outcome. Read the referenced local log for details. Standalone reviewer failures and internal `bd` failures (including import recovery)
+also expose only bounded operation/exit/category metadata. Their public errors
+and exception chains omit raw stdout/stderr, echoed prompts, comment bodies and
+raw launch/parse exceptions. These paths do not create a separate diagnostic
+capture; existing runner private logs remain governed by the owned-file policy.
+This policy covers automatic profile-failure and invalid-verdict diagnostics; configured stdout comments with valid markers are intentional publication, and command-mode profiles control their own comments.
 
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to one second for output draining. Timeouts and launch failures become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync `show` failure triggers automatic import/retry in normal runs. Comment and close failures never trigger recovery/replay; their outcome is uncertain, so read back the issue/comments before any manual retry; other failures stop immediately. Dry-run reads disable import recovery and stop with instructions to run `bd sync --import-only` explicitly before retrying. Dry runs still create/acquire the documented lock files, but never invoke sync, profiles, comment or close. `run.command_timeout_seconds` continues to apply only to profiles.
+
+Internal `bd` output is decoded as strict UTF-8 before JSON admission or recovery
+classification. Malformed/truncated sequences fail with a fixed `BeadsError`;
+replacement characters are never substituted into structured evidence. Valid
+multibyte text split across process reads is preserved. Profile display output
+retains its intentional replacement decoding.
 
 `bd show` must return exactly one issue object whose ID exactly matches the requested
 full canonical ID. Short/partial IDs are no longer accepted. A backend identity mismatch

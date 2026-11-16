@@ -61,6 +61,7 @@ def run_command(
     env: dict[str, str],
     cwd: Path | None = None,
     preserve_output: bool = False,
+    strict_utf8: bool = False,
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
 ) -> CommandResult:
     if max_output_bytes <= 0:
@@ -75,9 +76,11 @@ def run_command(
     )
 
     def decode(value: bytes) -> str:
+        if strict_utf8:
+            return value.decode("utf-8")
         if preserve_output:
             return value.decode("utf-8", errors="surrogateescape")
-        # Preserve the previous text-mode behavior for profile and Beads commands.
+        # Profile display output intentionally tolerates malformed bytes.
         return value.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
     output = (bytearray(), bytearray())

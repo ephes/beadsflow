@@ -230,7 +230,7 @@ Fish note: set the same variables with `set -gx BEADS_NO_DAEMON 1` and `set -gx 
 
 Recommended data flow (v0.1):
 
-- Use `bd ... --json` where available for machine parsing.
+- Use `bd ... --json` where available for machine parsing. Admit strict UTF-8 before JSON parsing; reject malformed byte sequences with fixed diagnostics rather than accepting replacement text. Standalone reviewer and internal `bd` failures expose only bounded operation/exit/category metadata, without raw output or external exception chains. Keep profile display decoding tolerant.
 - Use `bd show <id>` to load epic metadata and enumerate children.
 - Use `bd dep tree <epic-id>` (or per-child dependency inspection) to determine readiness ordering.
 - Use `bd comments add <id> ...` to post coordination markers and results.

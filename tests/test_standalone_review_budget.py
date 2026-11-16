@@ -83,7 +83,7 @@ def test_reviewer_own_exit_code_is_not_reported_as_harness_limit(code: int) -> N
         )
     message = str(caught.value)
     assert f"exit {code}" in message
-    assert "synthetic reviewer failure" in message
+    assert "synthetic reviewer failure" not in message
     assert "timed out" not in message
     assert "output exceeded" not in message
 
