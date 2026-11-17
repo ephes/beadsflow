@@ -451,6 +451,10 @@ launch, before accepting output, when resuming an approval for automatic close,
 and to implementer `require_git_changes` signatures. A failed check does not
 publish runner approval, replace existing evidence or close an issue. Configured
 Beads-directory exclusions continue to apply to review evidence.
+Because runner signatures record this porcelain-v2 status, approvals recorded
+by an earlier beadsflow version on uncommitted changes are treated as stale
+after upgrading and need a fresh review before automatic close; approvals over a
+clean worktree are unaffected.
 
 
 Child readiness uses the refreshed child status as well as its dependencies: only `open`
