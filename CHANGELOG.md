@@ -8,6 +8,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Security
 
+- Verify that the private diagnostic filename still refers directly to the written inode before publishing its path. Omit the path if the file disappeared or was replaced.
+
 - Refuse dirty submodule worktrees in review context, runner approval/close revalidation and implementer Git-change checks. Inspect Git's NUL-delimited porcelain-v2 submodule flags with ignore policies disabled; clean gitlink commit updates remain supported and visible in diffs even under repository ignore settings. Runner signatures now record porcelain-v2 status, so pending runner approvals recorded on uncommitted changes classify as stale after upgrading and need a fresh review before automatic close.
 - Fence untracked fingerprints and review sources against ancestor-directory replacement, retaining descriptors and rechecking named identities from the resolved worktree root through the leaf parent before returning evidence.
 - Require strict UTF-8 for internal bd responses before JSON admission, preserving valid split multibyte output and tolerant profile display decoding. Redact raw stdout/stderr and launch/parse exception chains from standalone reviewer and bd errors, including import/retry failures; expose only bounded operation/exit/category diagnostics.

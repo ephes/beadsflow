@@ -44,16 +44,14 @@ def _write_private(*, beads_dir: Path, prefix: str, content: str) -> Path:
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         name = f"{prefix}{timestamp}.{secrets.token_hex(16)}.log"
         fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-        try:
-            handle = os.fdopen(fd, "w", encoding="utf-8")
-        except BaseException:
-            os.close(fd)
-            raise
-        with handle:
+        # Keep the inode pinned through verification, even after the stream flushes and closes.
+        descriptors.callback(os.close, fd)
+        with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
             handle.write(content)
-        # Do not report a lexical path that was redirected while we wrote through
-        # owned descriptors. This checks identity at completion, not a path lock.
+        # Check name identity at completion. This does not lock the path.
         for parent, component, child in chain:
             if not os.path.samestat(os.stat(component, dir_fd=parent, follow_symlinks=False), os.fstat(child)):
                 raise OSError("Diagnostic directory changed during log creation")
+        if not os.path.samestat(os.stat(name, dir_fd=directory, follow_symlinks=False), os.fstat(fd)):
+            raise OSError("Diagnostic file changed during log creation")
         return beads_dir / "logs" / "beadsflow" / name

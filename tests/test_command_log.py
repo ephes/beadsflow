@@ -41,6 +41,7 @@ class Handle:
     handle: IO[str]
     fd: int
     resources: Resources
+    closefd: bool
 
     def __enter__(self) -> Handle:
         return self
@@ -55,7 +56,8 @@ class Handle:
         try:
             self.handle.close()
         finally:
-            self.resources.release(self.fd)
+            if self.closefd:
+                self.resources.release(self.fd)
         self.resources.boundary("close:file")
 
 
@@ -78,10 +80,11 @@ def resources(monkeypatch: pytest.MonkeyPatch) -> Iterator[Resources]:
 
     def close_fd(fd: int) -> None:
         assert fd in resources.active, "descriptor closed twice"
+        kind = "directory" if stat.S_ISDIR(real_fstat(fd).st_mode) else "descriptor"
         real_close(fd)
         resources.release(fd)
         # A close failure can be reported after the OS releases the descriptor.
-        resources.boundary("close:directory")
+        resources.boundary(f"close:{kind}")
 
     def mkdir(path: Any, mode: int = 0o777, *, dir_fd: int | None = None) -> None:
         resources.boundary(f"mkdir:{path}")
@@ -98,7 +101,7 @@ def resources(monkeypatch: pytest.MonkeyPatch) -> Iterator[Resources]:
 
     def fdopen(fd: int, *args: Any, **kwargs: Any) -> Handle:
         resources.boundary("fdopen")
-        return Handle(real_fdopen(fd, *args, **kwargs), fd, resources)
+        return Handle(real_fdopen(fd, *args, **kwargs), fd, resources, kwargs.get("closefd", True))
 
     monkeypatch.setattr(command_log.os, "open", open_fd)
     monkeypatch.setattr(command_log.os, "close", close_fd)
@@ -208,6 +211,7 @@ def test_renamed_open_directory_never_reports_redirected_path(
         "fdopen",
         "write",
         "close:file",
+        "close:descriptor",
         "close:directory",
     ],
 )
@@ -235,8 +239,8 @@ def test_success_releases_resources(tmp_path: Path, resources: Resources) -> Non
     assert_released(resources)
 
 
-@pytest.mark.parametrize("boundary", ["fchmod", "fdopen", "write", "close:file", "close:directory"])
-def test_runner_preserves_primary_failure_when_log_io_fails(
+@pytest.mark.parametrize("boundary", ["fchmod", "fdopen", "write", "close:file", "close:directory", "replace:file"])
+def test_runner_preserves_primary_failure_when_log_cannot_be_reported(
     tmp_path: Path,
     resources: Resources,
     monkeypatch: pytest.MonkeyPatch,
@@ -272,7 +276,19 @@ def test_runner_preserves_primary_failure_when_log_io_fails(
         "run_command",
         lambda *args, **kwargs: CommandResult(argv=[], returncode=7, stdout=_PRIVATE, stderr=_PRIVATE),
     )
-    resources.fault = boundary
+    if boundary == "replace:file":
+
+        def replace_leaf(closed_boundary: str) -> None:
+            if closed_boundary == "close:file":
+                (leaf,) = (tmp_path / ".beads" / "logs" / "beadsflow").glob("*.log")
+                retired = leaf.with_suffix(".retired")
+                leaf.rename(retired)
+                leaf.symlink_to(retired.name)
+                resources.hits.append("replace:file")
+
+        resources.interleave = replace_leaf
+    else:
+        resources.fault = boundary
     profile = Profile(CommandSpec(["synthetic"]), "stdout", "", "", False)
     with pytest.raises(CommandError, match="Reviewer failed with code 7") as exc:
         loop._run_profile_command(profile=profile, issue_id="issue", phase="reviewer")

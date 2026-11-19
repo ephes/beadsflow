@@ -357,11 +357,11 @@ created logs are not rewritten; inspect their permissions and contents when upgr
 Beads/log directory opens refuse symlinks even when swapped in during creation.
 Writes stay on owned descriptors if an opened directory is renamed. The three
 components below the resolved, trusted parent (`.beads`, `logs`, `beadsflow` by
-default) are rechecked before reporting the log path. A detected rename or
-replacement of those components is an I/O failure, so the affected path is not
-published. The trusted ancestor prefix is resolved once and is not monitored for
-changes. This completion check cannot prevent path changes after it; it does not
-lock the directory namespace.
+default) are rechecked before reporting the log path. The final filename must
+still refer directly to the inode that received the log. A missing or replaced
+entry, including a symlink back to the original file, suppresses the log path.
+The check covers those entries at completion. The trusted ancestor prefix is
+resolved once, and later path changes remain possible.
 On write, close or identity-check failure, an empty, partial or complete file may
 remain in the original owned directory, with mode 0600 under the mode-0700 log
 directory. No failed log path is published. Inspect and remove these artifacts
