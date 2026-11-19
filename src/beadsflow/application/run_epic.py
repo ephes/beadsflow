@@ -36,15 +36,14 @@ def run_epic(request: RunEpicRequest) -> int:
     elif request.verbose:
         logger.setLevel(logging.DEBUG)
 
-    provisional_beads_dir = request.beads_dir or os.environ.get("BEADSFLOW_BEADS_DIR") or ".beads"
-    provisional_paths = RepoPaths.discover(cwd=Path.cwd(), beads_dir=provisional_beads_dir)
-
     config_path = Path(request.config_path) if request.config_path is not None else None
     if config_path is None:
         env_config = os.environ.get("BEADSFLOW_CONFIG")
         if env_config:
             config_path = Path(env_config)
     if config_path is None:
+        provisional_beads_dir = request.beads_dir or os.environ.get("BEADSFLOW_BEADS_DIR") or ".beads"
+        provisional_paths = RepoPaths.discover(cwd=Path.cwd(), beads_dir=provisional_beads_dir)
         default_config = provisional_paths.repo_root / "beadsflow.toml"
         config_path = default_config if default_config.exists() else None
 

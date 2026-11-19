@@ -6,6 +6,7 @@ import pytest
 
 from beadsflow.entrypoints.cli import main
 from beadsflow.infra.locking import EpicLock
+from beadsflow.infra.paths import RepoPaths
 
 
 @pytest.fixture
@@ -99,6 +100,34 @@ def test_config_errors_return_cli_failure(
     assert caplog.messages
     assert "Traceback" not in caplog.text
     assert not (isolated_run / ".beads" / "locks").exists()
+
+
+@pytest.mark.parametrize("source", ["cli", "env", "default"])
+@pytest.mark.parametrize("value", ["true", "42", '""', '"  "'])
+def test_invalid_beads_dir_fails_before_store_discovery(
+    isolated_run: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    source: str,
+    value: str,
+) -> None:
+    path = isolated_run / ("beadsflow.toml" if source == "default" else "config.toml")
+    path.write_text(f"beads_dir = {value}\n", encoding="utf-8")
+    args = ["--config", str(path)] if source == "cli" else []
+    if source == "env":
+        monkeypatch.setenv("BEADSFLOW_CONFIG", str(path))
+    discover_paths = RepoPaths.discover
+    discovered: list[str | None] = []
+
+    def discover(*, cwd: Path, beads_dir: str | None) -> RepoPaths:
+        discovered.append(beads_dir)
+        return discover_paths(cwd=cwd, beads_dir=beads_dir)
+
+    monkeypatch.setattr(RepoPaths, "discover", staticmethod(discover))
+    with caplog.at_level(logging.ERROR, logger="beadsflow"):
+        assert main(["run", "epic-1", "--once", *args]) == 1
+    assert discovered == ([".beads"] if source == "default" else [])
+    assert "beads_dir must be a nonblank string" in caplog.messages
 
 
 def test_absent_discovered_config_uses_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

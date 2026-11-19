@@ -176,6 +176,10 @@ def load_settings(*, config_path: Path | None) -> Settings:
     if not isinstance(raw, dict):
         raise ConfigError("Config must be a TOML table at the root")
 
+    beads_dir = raw.get("beads_dir", settings.beads_dir)
+    if not isinstance(beads_dir, str) or not beads_dir.strip():
+        raise ConfigError("beads_dir must be a nonblank string")
+
     implementers_raw = raw.get("implementers", {})
     reviewers_raw = raw.get("reviewers", {})
     if not isinstance(implementers_raw, dict) or not isinstance(reviewers_raw, dict):
@@ -185,7 +189,7 @@ def load_settings(*, config_path: Path | None) -> Settings:
     reviewers = {str(name): _parse_profile(profile) for name, profile in reviewers_raw.items()}
 
     settings = Settings(
-        beads_dir=str(raw.get("beads_dir", settings.beads_dir)),
+        beads_dir=beads_dir,
         beads_no_db=_boolean(raw.get("beads_no_db", settings.beads_no_db), "beads_no_db"),
         interval_seconds=_integer(
             raw.get("interval_seconds", settings.interval_seconds), "interval_seconds", 0, 86400

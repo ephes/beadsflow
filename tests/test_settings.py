@@ -13,6 +13,14 @@ def test_load_settings_defaults_without_config() -> None:
     assert settings.interval_seconds == 30
 
 
+@pytest.mark.parametrize("beads_dir", [" stores/beads data ", "/tmp/beads data"])
+def test_load_settings_preserves_beads_dir(tmp_path: Path, beads_dir: str) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f'beads_dir = "{beads_dir}"\n', encoding="utf-8")
+
+    assert load_settings(config_path=config_path).beads_dir == beads_dir
+
+
 def test_load_settings_parses_profiles(tmp_path: Path) -> None:
     config_path = tmp_path / "beadsflow.toml"
     config_path.write_text(

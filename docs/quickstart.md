@@ -52,6 +52,12 @@ command_timeout_seconds = 3600
 If no repo-root `beadsflow.toml` exists, defaults apply. An explicit `--config` or `BEADSFLOW_CONFIG` path must exist and be readable.
 Missing explicit files, read/UTF-8/TOML failures, and empty or incorrectly quoted profile commands fail with exit code 1 and a configuration diagnostic before locking or launching processes. Configs must be regular files of at most 64 KiB (65,536 bytes) with at most 64 nesting levels below the root. A bounded iterative walk checks decoded tables and arrays before settings conversion, including otherwise unused fields. The loader opens one nonblocking descriptor, checks its type and size, and reads at most 65,537 bytes to detect overflow even if the file grows. FIFOs, devices, directories, oversized files, detected in-place changes and parser depth/resource failures are refused; the descriptor is closed on success and refusal. Symlinks to regular files remain supported; validation and reading use the opened file. File diagnostics include bounded path context and the error type, without dumping file contents or a traceback.
 
+In TOML, `beads_dir` must be a nonblank string. Relative and absolute paths are
+accepted as written, including spaces. The setting is checked before beadsflow
+uses it to locate the Beads store. With an explicit config path, validation
+precedes repository discovery. For the default config, beadsflow first locates
+the project root to find `beadsflow.toml`.
+
 Numeric settings must be TOML integers (quoted numbers, floats, and booleans are rejected):
 
 | Setting | Allowed range (inclusive) | Zero behavior |
