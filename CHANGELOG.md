@@ -50,6 +50,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ### Fixed
 
 - Reject non-string or blank TOML `beads_dir` values before using them to locate the Beads store.
+- Quote the manual command printed when Zellij is missing so a POSIX shell preserves the original run arguments.
 
 - Re-raise an interruption (`KeyboardInterrupt`/`SystemExit`) caught during command cleanup after the remaining stages run instead of converting it into a result or command error. Report cleanup failures after completion as `BeadsError` (with the outcome-uncertain guidance for writes) for internal `bd` commands and as `ZellijError` for Zellij inventory.
 

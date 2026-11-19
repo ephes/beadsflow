@@ -285,7 +285,10 @@ Check session status:
 uv run beadsflow session status beadsflow-<epic-id>
 ```
 
-If zellij is not installed, `beadsflow session ...` prints an equivalent manual `uv run beadsflow run ...` command.
+If zellij is not installed, `beadsflow session start` prints an equivalent
+manual `uv run beadsflow run ...` command to stderr. You can paste it into a
+POSIX-compatible shell. The quoting preserves arguments containing spaces and
+empty arguments.
 
 Noninteractive `session status` and `session stop` commands each give Zellij 10
 seconds to complete. A timeout or process startup failure returns exit code 1

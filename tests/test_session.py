@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 
 import pytest
 
-from beadsflow.application.errors import ConfigError
 from beadsflow.application.session import SessionStartRequest, SessionStatusRequest, handle_session
 from beadsflow.entrypoints import cli as cli_mod
 
@@ -17,18 +17,21 @@ class _Completed:
     limit: str | None = None
 
 
-def test_session_start_missing_zellij_prints_manual_command(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_session_start_missing_zellij_prints_manual_command(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     import beadsflow.infra.zellij as zellij_mod
 
     def which(_: str) -> str | None:
         return None
 
     monkeypatch.setattr(zellij_mod.shutil, "which", which)
-    request = SessionStartRequest(name="s", epic_id="beadsflow-3cx", run_args=["--dry-run"])
-    with pytest.raises(ConfigError) as excinfo:
-        handle_session(request)
-    assert "Run without zellij" in str(excinfo.value)
-    assert "uv run beadsflow run beadsflow-3cx --dry-run" in str(excinfo.value)
+    run_args = ["--config", "team's config/beadsflow.toml", "--implementer", "", "--dry-run"]
+    assert cli_mod.main(["session", "start", "s", "--epic", "beadsflow-3cx", "--", *run_args]) == 1
+    diagnostic, marker, manual = capsys.readouterr().err.partition("Run without zellij:\n")
+    assert "zellij" in diagnostic
+    assert marker
+    assert shlex.split(manual) == ["uv", "run", "beadsflow", "run", "beadsflow-3cx", *run_args]
 
 
 def test_session_status_detects_session(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,9 +75,9 @@ def test_session_start_invokes_zellij(monkeypatch: pytest.MonkeyPatch) -> None:
         run_args=["--interval", "30", "--verbose"],
     )
     assert handle_session(request) == 0
-    assert calls
-    assert calls[0][:5] == ["zellij", "-s", "sess", "-c", "--"]
-    assert calls[0][5:10] == ["uv", "run", "beadsflow", "run", "beadsflow-3cx"]
+    assert calls == [
+        ["zellij", "-s", "sess", "-c", "--", "uv", "run", "beadsflow", "run", request.epic_id, *request.run_args]
+    ]
 
 
 def test_cli_session_start_forwards_unknown_args(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 
 from beadsflow.application.errors import ConfigError
@@ -59,7 +60,7 @@ def _build_run_argv(*, epic_id: str, run_args: list[str]) -> list[str]:
 
 def _format_zellij_error(exc: ZellijError, *, request: SessionRequest) -> str:
     if isinstance(request, SessionStartRequest) and exc.kind == "missing":
-        manual = " ".join(_build_run_argv(epic_id=request.epic_id, run_args=request.run_args))
+        manual = shlex.join(_build_run_argv(epic_id=request.epic_id, run_args=request.run_args))
         return (
             f"zellij is required for `beadsflow session` but was not found on PATH.\n\nRun without zellij:\n{manual}"
         )
