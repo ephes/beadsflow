@@ -367,7 +367,9 @@ remain in the original owned directory, with mode 0600 under the mode-0700 log
 directory. No failed log path is published. Inspect and remove these artifacts
 manually, including in a renamed directory; retries create a new unique file.
 If a log cannot be written safely, beadsflow still reports the original profile failure
-and posts its failure comment without a log path. Normal and dry-run progress messages omit profile arguments. Commands can still print
+and posts its failure comment without a log path. If the log content cannot be
+encoded as UTF-8, the console reports a fixed encoding error that includes no log content.
+Normal and dry-run progress messages omit profile arguments. Commands can still print
 sensitive output. Automatic runner failure comments and default console errors contain only trusted phase/exit or verdict-validation diagnostics and a private log reference; they never include raw stdout/stderr excerpts. Invalid, empty or verdict-changing truncated stdout is likewise logged privately instead of copied into a failure comment. If a comment cannot be posted, only the exception type is logged and the primary failure remains the outcome. Read the referenced local log for details. Standalone reviewer failures and internal `bd` failures (including import recovery)
 also expose only bounded operation/exit/category metadata. Their public errors
 and exception chains omit raw stdout/stderr, echoed prompts, comment bodies and

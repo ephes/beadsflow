@@ -17,6 +17,8 @@ def write_command_log(*, beads_dir: Path, issue_id: str, phase: str, content: st
         raise CommandError("Cannot write diagnostic log: unsafe issue or phase filename")
     try:
         return _write_private(beads_dir=beads_dir, prefix=f"{issue_id}.{phase}.", content=content)
+    except UnicodeEncodeError:
+        raise CommandError("Cannot write diagnostic log: content cannot be encoded as UTF-8") from None
     except OSError as exc:
         raise CommandError("Cannot write diagnostic log: unsafe directory or I/O failure") from exc
 

@@ -493,6 +493,29 @@ def test_log_failure_preserves_profile_failure(
     assert list(outside.iterdir()) == []
 
 
+def test_log_encoding_failure_preserves_profile_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from beadsflow.application import runner
+    from beadsflow.infra.run_command import CommandResult
+
+    loop = diagnostic_loop(tmp_path)
+    result = CommandResult(
+        argv=["synthetic", "private-argument\udcff"], returncode=7, stdout="private-output", stderr=""
+    )
+    monkeypatch.setattr(runner, "run_command", lambda **kwargs: result)
+    profile = Profile(CommandSpec(["synthetic"]), "stdout", "", "", False)
+
+    with pytest.raises(CommandError, match="^Reviewer failed with code 7$"):
+        loop._run_profile_command(profile=profile, issue_id="issue", phase="reviewer")
+
+    assert loop.beads.comments == [("issue", "reviewer command failed (exit 7).")]  # type: ignore[attr-defined]
+    assert caplog.messages == [
+        "Cannot write diagnostic log: content cannot be encoded as UTF-8",
+        "reviewer command failed (exit 7).",
+    ]
+
+
 def test_implementer_change_check_failure_posts_trusted_comment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

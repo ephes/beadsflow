@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve the original profile failure and its Beads comment when diagnostic log content cannot be encoded as UTF-8. Report a fixed encoding error and omit the log path.
+
 ### Security
 
 - Verify that the private diagnostic filename still refers directly to the written inode before publishing its path. Omit the path if the file disappeared or was replaced.
