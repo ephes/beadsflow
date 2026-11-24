@@ -104,6 +104,7 @@ def run_command(
         raise ValueError("timeout_seconds must be finite and positive")
     process = subprocess.Popen(
         list(argv),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=cwd,

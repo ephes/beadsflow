@@ -50,6 +50,31 @@ def test_invalid_timeout_is_rejected_before_spawn(timeout_seconds: float, monkey
         run_command(argv=[sys.executable, "-c", "pass"], timeout_seconds=timeout_seconds, env={})
 
 
+def test_background_command_gets_eof_without_consuming_launcher_input() -> None:
+    launcher = """
+import sys
+from beadsflow.infra.run_command import run_command
+
+result = run_command(argv=[sys.executable, "-c", "import os; print(os.read(0, 1))"], timeout_seconds=2, env={})
+assert result.returncode == 0, result
+print(result.stdout, end="")
+"""
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, "rb") as reader, os.fdopen(write_fd, "wb") as writer:
+        writer.write(b"x")
+        writer.flush()
+        completed = subprocess.run(
+            [sys.executable, "-c", launcher],
+            stdin=reader,
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+        assert completed.stdout == b"b''\n"
+        os.set_blocking(reader.fileno(), False)
+        assert reader.read(1) == b"x"
+
+
 def test_timeout_cleans_descendant(tmp_path: Path) -> None:
     marker, pids = tmp_path / "marker", tmp_path / "pids"
     result = run_command(argv=[sys.executable, "-c", PARENT, str(marker), str(pids), CHILD], timeout_seconds=1, env={})
