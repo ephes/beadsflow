@@ -291,6 +291,10 @@ def resolve_review_request(
 ) -> ReviewRequest:
     if timeout_seconds <= 0:
         raise CommandError("Review timeout must be a positive number of seconds")
+    if diff_max_bytes is not None and diff_max_bytes <= 0:
+        raise CommandError("Review patch byte limit must be positive")
+    if comment_max_bytes is not None and comment_max_bytes <= 0:
+        raise CommandError("Review comment byte limit must be positive")
     resolved_issue = issue_id or os.environ.get("BEADSFLOW_ISSUE_ID")
     if not resolved_issue:
         raise CommandError("Missing issue id (set --issue-id or BEADSFLOW_ISSUE_ID)")

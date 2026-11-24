@@ -118,8 +118,10 @@ The complete patch and source sections must fit the positive `--diff-max-bytes`
 limit (default 8000); trailing patch whitespace is preserved and patches are never clipped into an approval-capable review.
 Overflow stops before reviewer launch and prints no review comment. Reduce the
 slice or raise the patch limit within the complete prompt budget. Comment bodies
-have a separate byte limit; comment truncation preserves UTF-8 and adds a notice
-when space permits. Synthetic orchestration tests
+use the separate `--comment-max-bytes` limit (default 4000). Comment truncation
+preserves UTF-8 and adds a notice when space permits. Defaults apply when the
+options are omitted. Both options require positive integers, and invalid values
+fail before any Beads or Git command runs. Synthetic orchestration tests
 exercise this assembly, request forwarding, Git failure handling and conservative
 verdict normalization without running Beads or an agent.
 

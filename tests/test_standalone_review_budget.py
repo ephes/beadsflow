@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,7 +12,54 @@ import pytest
 import beadsflow.application.review as review
 import beadsflow.entrypoints.cli as cli
 from beadsflow.application.errors import CommandError
-from beadsflow.domain.models import Issue, IssueStatus, IssueType
+from beadsflow.domain.models import Comment, Issue, IssueStatus, IssueType
+
+
+@pytest.mark.parametrize("value", [0, -1])
+@pytest.mark.parametrize(
+    ("option", "message"),
+    [
+        ("--diff-max-bytes", "Review patch byte limit must be positive"),
+        ("--comment-max-bytes", "Review comment byte limit must be positive"),
+    ],
+)
+def test_invalid_review_byte_limit_refuses_before_subprocesses(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], option: str, message: str, value: int
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("invalid review budget must not launch a subprocess")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    result = cli.main(["review", "--issue-id", "child", "--epic-id", "epic", option, str(value)])
+    captured = capsys.readouterr()
+    assert result == 1
+    assert captured.out == ""
+    assert captured.err == f"{message}\n"
+
+
+def test_review_accepts_one_byte_limits(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    comment = Comment(1, "synthetic", "Ready for review: context", now)
+    issue = Issue("child", "Synthetic", IssueStatus.OPEN, 0, IssueType.TASK, now, now, [], [], [comment])
+    monkeypatch.setattr(review.BeadsCli, "get_issue", lambda self, issue_id: issue)
+
+    def collect(limit: int, *, beads_dir: str) -> tuple[str, str, str]:
+        assert limit == 1
+        return "status", "stat", "x"
+
+    def reviewer(*, prompt: str, **kwargs: object) -> str:
+        assert f"synthetic {now.isoformat()}\nR\n" in prompt
+        return "LGTM"
+
+    monkeypatch.setattr(review, "_collect_git_context", collect)
+    monkeypatch.setattr(review, "_run_reviewer_command", reviewer)
+    result = cli.main(
+        ["review", "--issue-id", "child", "--epic-id", "epic", "--diff-max-bytes", "1", "--comment-max-bytes", "1"]
+    )
+    captured = capsys.readouterr()
+    assert result == 0
+    assert captured.out == "LGTM\n"
+    assert captured.err == ""
 
 
 @pytest.mark.parametrize("marker_first", [True, False])

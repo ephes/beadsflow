@@ -10,6 +10,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 - Reject non-finite and non-positive command timeouts before starting a subprocess.
 - Append a timeout notice to captured stderr even when a timed-out command already emitted diagnostics.
+- Reject nonpositive standalone review diff and comment byte limits before running Beads or Git commands.
 - Give background commands EOF on stdin so they cannot consume the caller's input.
 - Preserve the original profile failure and its Beads comment when diagnostic log content cannot be encoded as UTF-8. Report a fixed encoding error and omit the log path.
 
