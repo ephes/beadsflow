@@ -169,7 +169,7 @@ class BeadsCli:
                 raise BeadsError(f"{operation}: outcome uncertain; read back Beads state before any manual retry.")
             if not self.auto_sync:
                 raise BeadsError(
-                    f"{operation}: database out of sync; dry-run will not import. "
+                    f"{operation}: database out of sync; automatic import is disabled. "
                     "Run bd sync --import-only explicitly before retrying."
                 )
             recovery_operation = f"bd sync --import-only (recovering {operation})"

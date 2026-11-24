@@ -141,6 +141,11 @@ the flag is absent, database mode is the default. The selected variable accepts
 whitespace ignored. Invalid values, including empty strings, fail before any
 Beads read.
 
+The helper reads Beads with automatic import disabled. If `bd show` reports
+that the database is out of sync, review exits before launching the reviewer or
+printing a comment. Run `bd sync --import-only` explicitly against the same
+Beads directory before retrying.
+
 The configured reviewer interface passes the prompt as one command argument. The
 **complete prompt** must fit 64 KiB of UTF-8, including title, description,
 acceptance criteria, comment headers, Git status/stat and formatting. This cap is

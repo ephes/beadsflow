@@ -254,7 +254,7 @@ def _ensure_marker(output: str) -> str:
 
 
 def run_review(request: ReviewRequest) -> str:
-    beads = BeadsCli(beads_dir=request.beads_dir, no_db=request.beads_no_db)
+    beads = BeadsCli(beads_dir=request.beads_dir, no_db=request.beads_no_db, auto_sync=False)
     issue = beads.get_issue(request.issue_id)
     ready_comment = _latest_comment(issue.comments, {Marker.READY_FOR_REVIEW})
     review_comment = _latest_comment(issue.comments, {Marker.LGTM, Marker.CHANGES_REQUESTED})

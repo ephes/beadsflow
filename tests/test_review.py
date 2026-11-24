@@ -186,6 +186,64 @@ def test_resolve_review_no_db_precedence(
     assert request.beads_no_db is expected
 
 
+@pytest.mark.parametrize("out_of_sync", [True, False])
+def test_standalone_review_does_not_import(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], out_of_sync: bool
+) -> None:
+    import json
+
+    import beadsflow.application.review as review
+    import beadsflow.infra.beads_cli as beads_cli
+    from beadsflow.entrypoints.cli import main
+    from beadsflow.infra.run_command import CommandResult
+
+    monkeypatch.delenv("BEADSFLOW_BEADS_NO_DB", raising=False)
+    monkeypatch.delenv("BEADS_NO_DB", raising=False)
+    show = ["bd", "--no-daemon", "--json", "show", "I-1"]
+    calls: list[list[str]] = []
+    reviewer_calls: list[object] = []
+    payload = {
+        "id": "I-1",
+        "title": "Synthetic review",
+        "status": "open",
+        "issue_type": "task",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+    }
+
+    def fake_bd(*, argv: list[str], **kwargs: object) -> CommandResult:
+        calls.append(argv)
+        if argv == ["bd", "--no-daemon", "sync", "--import-only"]:
+            return CommandResult(argv, 0, "", "")
+        assert argv == show
+        if out_of_sync and len(calls) == 1:
+            return CommandResult(argv, 1, "", "Database out of sync with JSONL")
+        return CommandResult(argv, 0, json.dumps([payload]), "")
+
+    def fake_reviewer(**kwargs: object) -> str:
+        reviewer_calls.append(kwargs)
+        return "LGTM"
+
+    monkeypatch.setattr(beads_cli, "run_command", fake_bd)
+    monkeypatch.setattr(review, "_collect_git_context", lambda *args, **kwargs: ("", "", ""))
+    monkeypatch.setattr(review, "_run_reviewer_command", fake_reviewer)
+
+    result = main(["review", "--issue-id", "I-1", "--epic-id", "E-1"])
+    assert calls == [show]
+    output = capsys.readouterr()
+    if out_of_sync:
+        assert result == 1
+        assert reviewer_calls == []
+        assert output.out == ""
+        assert "database out of sync; automatic import is disabled" in output.err
+        assert "Run bd sync --import-only explicitly before retrying." in output.err
+    else:
+        assert result == 0
+        assert len(reviewer_calls) == 1
+        assert output.out == "LGTM\n"
+        assert output.err == ""
+
+
 def test_reviewer_timeout_cli_fails_without_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -301,8 +359,8 @@ def test_run_review_assembles_context_and_forwards_request(
     events: list[object] = []
 
     class FakeBeads:
-        def __init__(self, *, beads_dir: str, no_db: bool) -> None:
-            events.append((beads_dir, no_db))
+        def __init__(self, *, beads_dir: str, no_db: bool, auto_sync: bool) -> None:
+            events.append((beads_dir, no_db, auto_sync))
 
         def get_issue(self, issue_id: str) -> Issue:
             events.append(issue_id)
@@ -337,7 +395,7 @@ def test_run_review_assembles_context_and_forwards_request(
         "child-1", "epic-1", "synthetic-beads", True, "fake-review --flag", "--prompt", 1000, 45, 17
     )
     assert review.run_review(request) == expected
-    assert events[:2] == [("synthetic-beads", True), "child-1"]
+    assert events[:2] == [("synthetic-beads", True, False), "child-1"]
     assert set(events[2:]) == set(git_outputs)
     assert len(recorded) == 1
     call = recorded[0]
