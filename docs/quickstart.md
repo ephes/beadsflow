@@ -346,6 +346,10 @@ note (an initiating interruption keeps precedence). Cleanup uncertainty means th
 or pipe resources may remain; inspect them before retrying. Raw cleanup exception
 messages are never copied into these notes or diagnostics.
 
+On timeout, captured stderr is followed by a notice with the command's deadline.
+That notice and the structured timeout status apply only when the runner stops
+the command. A child that exits with code 124 keeps its own stderr.
+
 Runner profiles, standalone reviewer commands and internal Beads commands have a hard 8 MiB combined stdout/stderr
 capture limit per command. Git context/signature commands have a separate 64 MiB cap
 to accommodate large tracked diffs. Dirty trees exceeding the Git cap stop runs/reviews

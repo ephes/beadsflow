@@ -129,9 +129,8 @@ def run_command(
         cleanup.raise_interrupt()
         code = 124
         limit = "timeout"
-        if not output[1]:
-            notice = f"Timed out after {timeout_seconds} seconds."
-        notice += cleanup.notice()
+        separator = "\n" if output[1] and not output[1].endswith(b"\n") else ""
+        notice = f"{separator}Timed out after {timeout_seconds} seconds." + cleanup.notice()
     except BaseException as exc:
         cleanup = _stop_group(process, output, max_output_bytes)
         if isinstance(exc, Exception):

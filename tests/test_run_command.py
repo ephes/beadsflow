@@ -127,6 +127,27 @@ def test_timeout_diagnostic_and_success() -> None:
     assert success.stdout == "done\n"
 
 
+def test_timeout_diagnostic_preserves_child_stderr() -> None:
+    write_stderr = "import os; os.write(2, b'child diagnostic'); "
+    timed = run_command(
+        argv=[sys.executable, "-c", write_stderr + "import time; time.sleep(30)"],
+        timeout_seconds=1,
+        env={},
+    )
+    assert timed.returncode == 124
+    assert timed.limit == "timeout"
+    assert timed.stderr.startswith("child diagnostic\nTimed out after 1 seconds.")
+
+    completed = run_command(
+        argv=[sys.executable, "-c", write_stderr + "raise SystemExit(124)"],
+        timeout_seconds=5,
+        env={},
+    )
+    assert completed.returncode == 124
+    assert completed.limit is None
+    assert completed.stderr == "child diagnostic"
+
+
 def test_timeout_escalates_for_stubborn_group(tmp_path: Path) -> None:
     marker, pids = tmp_path / "marker", tmp_path / "pids"
     stubborn = PARENT.replace("signal.signal(signal.SIGTERM, stop)", "signal.signal(signal.SIGTERM, signal.SIG_IGN)")
