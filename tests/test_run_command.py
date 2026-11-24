@@ -40,6 +40,16 @@ def assert_gone(pids: Path) -> None:
             os.kill(pid, 0)
 
 
+@pytest.mark.parametrize("timeout_seconds", [float("nan"), float("inf"), float("-inf"), -1, 0])
+def test_invalid_timeout_is_rejected_before_spawn(timeout_seconds: float, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected_spawn(*args: object, **kwargs: object) -> None:
+        pytest.fail("command spawned with an invalid timeout")
+
+    monkeypatch.setattr(subprocess, "Popen", unexpected_spawn)
+    with pytest.raises(ValueError, match="timeout_seconds must be finite and positive"):
+        run_command(argv=[sys.executable, "-c", "pass"], timeout_seconds=timeout_seconds, env={})
+
+
 def test_timeout_cleans_descendant(tmp_path: Path) -> None:
     marker, pids = tmp_path / "marker", tmp_path / "pids"
     result = run_command(argv=[sys.executable, "-c", PARENT, str(marker), str(pids), CHILD], timeout_seconds=1, env={})

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import select
 import selectors
@@ -99,6 +100,8 @@ def run_command(
 ) -> CommandResult:
     if max_output_bytes <= 0:
         raise ValueError("max_output_bytes must be positive")
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be finite and positive")
     process = subprocess.Popen(
         list(argv),
         stdout=subprocess.PIPE,

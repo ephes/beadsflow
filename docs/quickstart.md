@@ -323,6 +323,9 @@ directory namespace or prevent external changes after admission.
 
 Trusted ancestors above those two levels are resolved first, so system aliases such as macOS `/tmp` remain usable. A symlinked `.beads` directory is refused; use its real directory path in the configuration.
 
+The shared command runner requires a finite, positive timeout in seconds. It
+raises `ValueError` before starting a subprocess if the timeout is invalid.
+
 Runner profile commands on macOS/Linux execute in an owned process group. On timeout, overflow or interruption, beadsflow sends TERM, allows a short cleanup grace period, then sends KILL to remaining group members and gives the direct command a finite reap allowance. Cleanup adds at most 1.5 seconds, including up to one second of output draining; ordinary completion allows up to 0.5 seconds to reap. If reaping cannot complete, an ordinary completion raises a command error instead of returning success. Timeout/output-limit results retain codes 124/125 and append a cleanup-uncertainty diagnostic; the child may still be alive, so inspect it before retrying. Timeout results retain partial output and return code 124. Output draining is bounded even if an escaped descendant retains a pipe. Descendants that deliberately leave the process group are outside the cleanup guarantee; this is not a process sandbox. On ordinary completion (including a nonzero exit), remaining group members also receive TERM/KILL before the result returns or execution locks are released. The leader stays unreaped until the last signal, preventing process-group ID reuse, and its real exit code/output are preserved when cleanup completes. Commands must not rely on background group members continuing after the leader exits. This applies to runner profiles and the standalone `beadsflow review` helper.
 
 Cleanup attempts TERM, bounded draining, KILL, bounded reaping and each pipe close
