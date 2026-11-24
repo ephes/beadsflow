@@ -131,6 +131,61 @@ def test_resolve_review_request_uses_env_fallbacks(monkeypatch: pytest.MonkeyPat
     assert request.comment_max_bytes == DEFAULT_COMMENT_MAX_BYTES
 
 
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [("BEADSFLOW_BEADS_NO_DB", "typo"), ("BEADSFLOW_BEADS_NO_DB", ""), ("BEADS_NO_DB", "typo")],
+)
+def test_review_rejects_invalid_no_db_before_store_access(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], variable: str, value: str
+) -> None:
+    import beadsflow.application.review as review
+    from beadsflow.entrypoints.cli import main
+
+    monkeypatch.delenv("BEADSFLOW_BEADS_NO_DB", raising=False)
+    monkeypatch.setenv("BEADS_NO_DB", "yes")
+    monkeypatch.setenv(variable, value)
+
+    def unexpected_store(**kwargs: object) -> None:
+        pytest.fail("invalid no-db configuration reached the Beads client")
+
+    monkeypatch.setattr(review, "BeadsCli", unexpected_store)
+    assert main(["review", "--issue-id", "I-1", "--epic-id", "E-1"]) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert f"{variable} must be a boolean" in output.err
+
+
+@pytest.mark.parametrize(
+    ("flag", "primary", "fallback", "expected"),
+    [
+        (True, "typo", "typo", True),
+        (False, " OFF ", "yes", False),
+        (False, None, "ON", True),
+        (False, None, "0", False),
+        (False, None, None, False),
+    ],
+)
+def test_resolve_review_no_db_precedence(
+    monkeypatch: pytest.MonkeyPatch, flag: bool, primary: str | None, fallback: str | None, expected: bool
+) -> None:
+    for variable, value in (("BEADSFLOW_BEADS_NO_DB", primary), ("BEADS_NO_DB", fallback)):
+        if value is None:
+            monkeypatch.delenv(variable, raising=False)
+        else:
+            monkeypatch.setenv(variable, value)
+    request = resolve_review_request(
+        issue_id="I-1",
+        epic_id="E-1",
+        beads_dir=".beads",
+        beads_no_db=flag,
+        cli_command="fake-review",
+        prompt_arg="-p",
+        diff_max_bytes=None,
+        comment_max_bytes=None,
+    )
+    assert request.beads_no_db is expected
+
+
 def test_reviewer_timeout_cli_fails_without_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

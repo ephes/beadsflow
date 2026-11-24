@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Reject invalid standalone review database-mode environment values before reading Beads.
 - Preview epic runs without creating or updating worktree or epic locks.
 - Publish failure logs only after a successful write and stream close, preserving any file already at the destination.
 - Reject non-finite and non-positive command timeouts before starting a subprocess.

@@ -205,16 +205,22 @@ def load_settings(*, config_path: Path | None) -> Settings:
     return settings
 
 
+def parse_env_bool(value: str, name: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError(f"{name} must be a boolean (1/0, true/false, yes/no, on/off)")
+
+
 def apply_env_overrides(settings: Settings) -> Settings:
     beads_dir = os.environ.get("BEADSFLOW_BEADS_DIR", settings.beads_dir)
     beads_no_db_env = os.environ.get("BEADSFLOW_BEADS_NO_DB")
     if beads_no_db_env is None:
         beads_no_db = settings.beads_no_db
     else:
-        normalized = beads_no_db_env.strip().lower()
-        if normalized not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
-            raise ConfigError("BEADSFLOW_BEADS_NO_DB must be a boolean (1/0, true/false, yes/no, on/off)")
-        beads_no_db = normalized in {"1", "true", "yes", "on"}
+        beads_no_db = parse_env_bool(beads_no_db_env, "BEADSFLOW_BEADS_NO_DB")
     try:
         interval = int(os.environ.get("BEADSFLOW_INTERVAL", str(settings.interval_seconds)))
     except ValueError as exc:

@@ -134,6 +134,13 @@ comment_mode = "stdout"
 `--cli` is parsed with `shlex.split(...)`, so you can pass a full command (e.g., `--cli "claude --model opus"`).
 Use `--prompt-arg` to match the flag your CLI uses to receive the prompt (default: `-p`).
 
+`beadsflow review` uses `--beads-no-db` first, then the first set variable in
+`BEADSFLOW_BEADS_NO_DB`, `BEADS_NO_DB` order. If neither variable is set and
+the flag is absent, database mode is the default. The selected variable accepts
+`1/0`, `true/false`, `yes/no`, and `on/off` with case and surrounding
+whitespace ignored. Invalid values, including empty strings, fail before any
+Beads read.
+
 The configured reviewer interface passes the prompt as one command argument. The
 **complete prompt** must fit 64 KiB of UTF-8, including title, description,
 acceptance criteria, comment headers, Git status/stat and formatting. This cap is

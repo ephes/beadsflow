@@ -14,6 +14,7 @@ from beadsflow.infra.beads_cli import BeadsCli
 from beadsflow.infra.git_command import capture_git
 from beadsflow.infra.git_signature import FingerprintBudget, refuse_dirty_submodules, review_pathspec, untracked_source
 from beadsflow.infra.run_command import DEFAULT_MAX_OUTPUT_BYTES, run_command
+from beadsflow.settings import parse_env_bool
 
 DEFAULT_REVIEW_TIMEOUT_SECONDS = 3600
 DEFAULT_DIFF_MAX_BYTES = 8000
@@ -303,9 +304,11 @@ def resolve_review_request(
         raise CommandError("Missing epic id (set --epic-id or BEADSFLOW_EPIC_ID)")
     resolved_beads_dir = beads_dir or os.environ.get("BEADSFLOW_BEADS_DIR") or os.environ.get("BEADS_DIR") or ".beads"
     if not beads_no_db:
-        raw_no_db = os.environ.get("BEADSFLOW_BEADS_NO_DB") or os.environ.get("BEADS_NO_DB")
-        if raw_no_db and raw_no_db.strip().lower() in {"1", "true", "yes", "on"}:
-            beads_no_db = True
+        for name in ("BEADSFLOW_BEADS_NO_DB", "BEADS_NO_DB"):
+            value = os.environ.get(name)
+            if value is not None:
+                beads_no_db = parse_env_bool(value, name)
+                break
     return ReviewRequest(
         issue_id=resolved_issue,
         epic_id=resolved_epic,
