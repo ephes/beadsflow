@@ -4,7 +4,7 @@ import os
 import re
 import secrets
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from pathlib import Path
 
 from beadsflow.application.errors import CommandError
@@ -44,16 +44,36 @@ def _write_private(*, beads_dir: Path, prefix: str, content: str) -> Path:
             raise OSError("Diagnostic directory is not owned by the current user")
         os.fchmod(directory, 0o700)
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        name = f"{prefix}{timestamp}.{secrets.token_hex(16)}.log"
-        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
-        # Keep the inode pinned through verification, even after the stream flushes and closes.
+        token = secrets.token_hex(16)
+        name = f"{prefix}{timestamp}.{token}.log"
+        staged = f".{token}.tmp"
+        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        # Keep the inode pinned through publication and staged-name cleanup.
         descriptors.callback(os.close, fd)
+        descriptors.callback(_remove_staged, directory, staged, fd)
         with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
             handle.write(content)
+
+        if not _matches_inode(directory, staged, fd):
+            raise OSError("Staged diagnostic changed during log creation")
+        # Publish only after the stream closes successfully. Linking is exclusive
+        # at the destination, so a concurrently created file is left untouched.
+        os.link(staged, name, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
         # Check name identity at completion. This does not lock the path.
         for parent, component, child in chain:
-            if not os.path.samestat(os.stat(component, dir_fd=parent, follow_symlinks=False), os.fstat(child)):
+            if not _matches_inode(parent, component, child):
                 raise OSError("Diagnostic directory changed during log creation")
-        if not os.path.samestat(os.stat(name, dir_fd=directory, follow_symlinks=False), os.fstat(fd)):
+        if not _matches_inode(directory, name, fd):
             raise OSError("Diagnostic file changed during log creation")
         return beads_dir / "logs" / "beadsflow" / name
+
+
+def _matches_inode(directory: int, name: str, fd: int) -> bool:
+    return os.path.samestat(os.stat(name, dir_fd=directory, follow_symlinks=False), os.fstat(fd))
+
+
+def _remove_staged(directory: int, staged: str, fd: int) -> None:
+    # A cleanup error may leave a private .tmp file and must preserve the primary error.
+    with suppress(OSError):
+        if _matches_inode(directory, staged, fd):
+            os.unlink(staged, dir_fd=directory)

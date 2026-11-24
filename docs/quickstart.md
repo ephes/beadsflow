@@ -377,10 +377,13 @@ still refer directly to the inode that received the log. A missing or replaced
 entry, including a symlink back to the original file, suppresses the log path.
 The check covers those entries at completion. The trusted ancestor prefix is
 resolved once, and later path changes remain possible.
-On write, close or identity-check failure, an empty, partial or complete file may
-remain in the original owned directory, with mode 0600 under the mode-0700 log
-directory. No failed log path is published. Inspect and remove these artifacts
-manually, including in a renamed directory; retries create a new unique file.
+Failed profile diagnostics are written to hidden mode-0600 staging files in the
+private log directory. Only after the stream closes successfully does beadsflow
+publish the `.log` name, and a file already at that name is preserved. Beadsflow
+attempts to remove the staging file. A cleanup failure or abrupt exit can leave
+a hidden `.tmp` file, and a failure after publication can leave a complete
+`.log` without a reported path. Inspect and remove these artifacts manually,
+including in a renamed directory. Retries use a fresh name.
 If a log cannot be written safely, beadsflow still reports the original profile failure
 and posts its failure comment without a log path. If the log content cannot be
 encoded as UTF-8, the console reports a fixed encoding error that includes no log content.

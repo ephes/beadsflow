@@ -66,6 +66,7 @@ def resources(monkeypatch: pytest.MonkeyPatch) -> Iterator[Resources]:
     resources = Resources()
     real_open, real_close, real_fdopen = os.open, os.close, os.fdopen
     real_mkdir, real_fstat, real_fchmod = os.mkdir, os.fstat, os.fchmod
+    real_link = os.link
 
     def open_fd(path: Any, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
         label = "file" if flags & os.O_CREAT else str(path) if dir_fd is not None else "root"
@@ -103,12 +104,17 @@ def resources(monkeypatch: pytest.MonkeyPatch) -> Iterator[Resources]:
         resources.boundary("fdopen")
         return Handle(real_fdopen(fd, *args, **kwargs), fd, resources, kwargs.get("closefd", True))
 
+    def link(src: str, dst: str, **kwargs: Any) -> None:
+        real_link(src, dst, **kwargs)
+        resources.boundary("linked:file")
+
     monkeypatch.setattr(command_log.os, "open", open_fd)
     monkeypatch.setattr(command_log.os, "close", close_fd)
     monkeypatch.setattr(command_log.os, "mkdir", mkdir)
     monkeypatch.setattr(command_log.os, "fstat", fstat)
     monkeypatch.setattr(command_log.os, "fchmod", fchmod)
     monkeypatch.setattr(command_log.os, "fdopen", fdopen)
+    monkeypatch.setattr(command_log.os, "link", link)
     yield resources
     # Also clean up if the production bug leaks a descriptor during a red run.
     for fd in list(resources.active):
@@ -239,7 +245,41 @@ def test_success_releases_resources(tmp_path: Path, resources: Resources) -> Non
     assert_released(resources)
 
 
-@pytest.mark.parametrize("boundary", ["fchmod", "fdopen", "write", "close:file", "close:directory", "replace:file"])
+@pytest.mark.parametrize(
+    ("fault", "occupy_final"),
+    [("write", False), ("close:file", False), ("write", True), ("", True)],
+)
+def test_failed_publication_preserves_existing_logs(
+    tmp_path: Path, resources: Resources, monkeypatch: pytest.MonkeyPatch, fault: str, occupy_final: bool
+) -> None:
+    earlier = write_log(tmp_path)
+    monkeypatch.setattr(command_log.time, "strftime", lambda _format: "20260101-000000")
+    monkeypatch.setattr(command_log.secrets, "token_hex", lambda _size: "synthetic")
+    final = earlier.with_name("issue.reviewer.20260101-000000.synthetic.log")
+    visible_during_write: list[bool] = []
+
+    def observe_write(boundary: str) -> None:
+        if boundary == "write":
+            visible_during_write.append(final.exists())
+            if occupy_final:
+                final.unlink(missing_ok=True)
+                final.write_text("foreign diagnostic")
+
+    resources.fault = fault
+    resources.interleave = observe_write
+    with pytest.raises(CommandError, match="unsafe directory or I/O failure"):
+        write_log(tmp_path)
+    assert visible_during_write == [False]
+    assert earlier.read_text() == _PRIVATE
+    assert set(earlier.parent.iterdir()) == ({earlier, final} if occupy_final else {earlier})
+    if occupy_final:
+        assert final.read_text() == "foreign diagnostic"
+    assert_released(resources)
+
+
+@pytest.mark.parametrize(
+    "boundary", ["fchmod", "fdopen", "write", "close:file", "close:directory", "replace:stage", "replace:file"]
+)
 def test_runner_preserves_primary_failure_when_log_cannot_be_reported(
     tmp_path: Path,
     resources: Resources,
@@ -276,15 +316,18 @@ def test_runner_preserves_primary_failure_when_log_cannot_be_reported(
         "run_command",
         lambda *args, **kwargs: CommandResult(argv=[], returncode=7, stdout=_PRIVATE, stderr=_PRIVATE),
     )
-    if boundary == "replace:file":
+    if boundary in {"replace:stage", "replace:file"}:
+        stage = boundary == "replace:stage"
+        swap_at = "close:file" if stage else "linked:file"
+        pattern = ".*.tmp" if stage else "*.log"
 
-        def replace_leaf(closed_boundary: str) -> None:
-            if closed_boundary == "close:file":
-                (leaf,) = (tmp_path / ".beads" / "logs" / "beadsflow").glob("*.log")
+        def replace_leaf(event: str) -> None:
+            if event == swap_at:
+                (leaf,) = (tmp_path / ".beads" / "logs" / "beadsflow").glob(pattern)
                 retired = leaf.with_suffix(".retired")
                 leaf.rename(retired)
                 leaf.symlink_to(retired.name)
-                resources.hits.append("replace:file")
+                resources.hits.append(boundary)
 
         resources.interleave = replace_leaf
     else:
