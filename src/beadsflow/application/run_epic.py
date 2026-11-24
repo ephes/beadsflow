@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,11 +42,11 @@ def run_epic(request: RunEpicRequest) -> int:
         env_config = os.environ.get("BEADSFLOW_CONFIG")
         if env_config:
             config_path = Path(env_config)
-    if config_path is None:
-        provisional_beads_dir = request.beads_dir or os.environ.get("BEADSFLOW_BEADS_DIR") or ".beads"
-        provisional_paths = RepoPaths.discover(cwd=Path.cwd(), beads_dir=provisional_beads_dir)
-        default_config = provisional_paths.repo_root / "beadsflow.toml"
-        config_path = default_config if default_config.exists() else None
+        else:
+            provisional_beads_dir = request.beads_dir or os.environ.get("BEADSFLOW_BEADS_DIR") or ".beads"
+            provisional_paths = RepoPaths.discover(cwd=Path.cwd(), beads_dir=provisional_beads_dir)
+            default_config = provisional_paths.repo_root / "beadsflow.toml"
+            config_path = default_config if default_config.exists() else None
 
     try:
         settings = apply_env_overrides(load_settings(config_path=config_path))
@@ -78,10 +79,12 @@ def run_epic(request: RunEpicRequest) -> int:
         )
         lock_path = epic_lock_path(repo_paths.beads_dir, request.epic_id)
 
-        # Fixed worktree location, independent of the selected Beads database/epic.
-        # Acquire worktree first, then epic; release both on every exit.
-        writer_lock = repo_paths.worktree_root / ".beadsflow" / "locks" / "execution.lock"
-        with EpicLock(lock_path=writer_lock), EpicLock(lock_path=lock_path):
+        with ExitStack() as locks:
+            if not request.dry_run:
+                # Acquire worktree first, then epic; release both on every exit.
+                writer_lock = repo_paths.worktree_root / ".beadsflow" / "locks" / "execution.lock"
+                locks.enter_context(EpicLock(lock_path=writer_lock))
+                locks.enter_context(EpicLock(lock_path=lock_path))
             loop = EpicRunLoop(
                 beads=beads_cli,
                 epic_id=request.epic_id,

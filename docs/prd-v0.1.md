@@ -76,7 +76,7 @@ Core flags (v0.1):
 - `--beads-dir <path>`: Repo-local Beads directory; default: `.beads`.
 - `--once`: Do exactly one pick+run iteration and exit.
 - `--interval <seconds>`: Sleep between iterations when not `--once`.
-- `--dry-run`: Print what would run (selected child bead, commands) but do not execute implementer/reviewer commands, sync/import recovery or write Beads content. Out-of-sync reads stop with explicit manual import guidance; the documented lock-file writes remain intentional.
+- `--dry-run`: Print what would run (selected child bead, commands) but do not execute implementer/reviewer commands, sync/import recovery or write Beads content. Out-of-sync reads stop with explicit manual import guidance; previews skip both writer locks and reflect the state observed during their reads, which concurrent work can change.
 - `--implementer <name>` / `--reviewer <name>`: Select configured profiles.
 - `--max-iterations <n>`: Safety cap for long-running loops.
 - `--verbose` / `--quiet`: Control logging verbosity (useful for debugging/CI).

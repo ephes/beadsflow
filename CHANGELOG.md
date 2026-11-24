@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Preview epic runs without creating or updating worktree or epic locks.
 - Reject non-finite and non-positive command timeouts before starting a subprocess.
 - Append a timeout notice to captured stderr even when a timed-out command already emitted diagnostics.
 - Reject nonpositive standalone review diff and comment byte limits before running Beads or Git commands.

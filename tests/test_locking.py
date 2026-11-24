@@ -16,6 +16,44 @@ from beadsflow.infra import locking
 from beadsflow.infra.locking import EpicLock, epic_lock_path
 
 
+@pytest.mark.parametrize("lock_state", ["absent", "existing", "obstructed"])
+def test_dry_run_leaves_writer_lock_paths_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lock_state: str
+) -> None:
+    from beadsflow.entrypoints.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    for variable in os.environ:
+        if variable.startswith("BEADSFLOW_"):
+            monkeypatch.delenv(variable)
+    beads = tmp_path / ".beads"
+    beads.mkdir()
+    writer = tmp_path / ".beadsflow" / "locks" / "execution.lock"
+    epic = epic_lock_path(beads, "synthetic-1")
+    if lock_state == "existing":
+        for path in (writer, epic):
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"synthetic lock metadata\n")
+    elif lock_state == "obstructed":
+        (tmp_path / ".beadsflow").write_bytes(b"synthetic obstruction\n")
+        epic.parent.write_bytes(b"synthetic obstruction\n")
+
+    def snapshot() -> dict[Path, bytes | None]:
+        return {
+            path.relative_to(tmp_path): path.read_bytes() if path.is_file() else None for path in tmp_path.rglob("*")
+        }
+
+    def preview(self: EpicRunLoop, *, once: bool, dry_run: bool, max_iterations: int) -> int:
+        assert once and dry_run
+        assert not self.beads.auto_sync
+        return 0
+
+    monkeypatch.setattr(EpicRunLoop, "run", preview)
+    before = snapshot()
+    assert main(["run", "synthetic-1", "--once", "--dry-run"]) == 0
+    assert snapshot() == before
+
+
 @contextmanager
 def hold_lock_in_process(path: Path) -> Iterator[None]:
     holder = """
