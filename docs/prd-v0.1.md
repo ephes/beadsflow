@@ -195,9 +195,9 @@ Command templating (v0.1):
 
 ### Locking
 
-- Acquire the worktree execution lock at `<worktree_root>/.beadsflow/locks/execution.lock` first, then the epic lock, before any automation. The execution lock is independent of the configured Beads database or nested Beads project; it uses the nearest Git ancestor of the discovered project root, or that project root outside Git. Separate linked worktrees can run distinct epics; a shared database still excludes simultaneous runs of the same epic.
+- For execution runs, acquire the worktree execution lock at `<worktree_root>/.beadsflow/locks/execution.lock` first, then the epic lock, before any automation. The execution lock is independent of the configured Beads database or nested Beads project; it uses the nearest Git ancestor of the discovered project root, or that project root outside Git. Separate linked worktrees can run distinct epics; a shared database still excludes simultaneous runs of the same epic.
 - Lock location: `${BEADS_DIR}/locks/beadsflow-<epic-id>.lock` (directory created if missing).
-- Both locks are held for the full run, including dry runs, and released on failure or interruption.
+- Execution runs hold both locks for the full run and release them on failure or interruption. Dry runs take neither lock and never create, truncate or otherwise touch the lock paths.
 - Before PID writes or automation, require a current-user-owned single-link regular inode and recheck file/directory name identities through pinned descriptors after `flock`. Detected replacements fail closed without unlinking other entries. Lock names/directories must remain stable during a run; the namespace is not locked against external changes after admission.
 - If lock acquisition fails, exit with a dedicated non-zero code and print which PID/host holds the lock when possible.
 
