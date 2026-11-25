@@ -27,6 +27,8 @@ def capture_git(
         )
     except OSError as exc:
         raise CommandError(f"Cannot execute {operation} ({type(exc).__name__})") from exc
+    if result.limit is None and result.cleanup_incomplete:
+        raise CommandError(f"{operation} failed (exit {result.returncode}): command cleanup incomplete")
     if result.returncode == 124:
         raise CommandError(f"{operation} timed out after {GIT_TIMEOUT_SECONDS} seconds")
     if result.returncode not in (allow_exit if allow_exit is not None else {0}):

@@ -2,20 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from beadsflow.infra.beads_cli import BeadsCli
-
-
-@dataclass(frozen=True, slots=True)
-class _Completed:
-    returncode: int
-    stdout: str = ""
-    stderr: str = ""
-    limit: str | None = None
+from beadsflow.infra.run_command import CommandResult
 
 
 def test_beads_cli_auto_imports_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,16 +37,16 @@ def test_beads_cli_auto_imports_on_out_of_sync(monkeypatch: pytest.MonkeyPatch) 
         }
     ]
 
-    def run(*, argv: list[str], **kwargs: object) -> _Completed:
+    def run(*, argv: list[str], **kwargs: object) -> CommandResult:
         nonlocal show_calls
         calls.append(argv)
         if argv[:4] == ["bd", "--no-daemon", "--json", "show"]:
             show_calls += 1
             if show_calls == 1:
-                return _Completed(returncode=1, stderr="Error: Database out of sync with JSONL.")
-            return _Completed(returncode=0, stdout=json.dumps(payload))
+                return CommandResult(argv, returncode=1, stdout="", stderr="Error: Database out of sync with JSONL.")
+            return CommandResult(argv, returncode=0, stdout=json.dumps(payload), stderr="")
         if argv[:3] == ["bd", "--no-daemon", "sync"] and "--import-only" in argv:
-            return _Completed(returncode=0)
+            return CommandResult(argv, 0, "", "")
         raise AssertionError(f"Unexpected argv: {argv}")
 
     monkeypatch.setattr(beads_cli_mod, "run_command", run)
@@ -82,14 +74,14 @@ def test_uncertain_mutation_is_not_recovered_or_replayed(monkeypatch: pytest.Mon
     calls: list[list[str]] = []
     applied: list[str] = []
 
-    def run(*, argv: list[str], **kwargs: object) -> _Completed:
+    def run(*, argv: list[str], **kwargs: object) -> CommandResult:
         calls.append(argv)
         if "show" in argv:
-            return _Completed(0, stdout=json.dumps(applied))
+            return CommandResult(argv, 0, json.dumps(applied), "")
         if "sync" in argv:
-            return _Completed(0)
+            return CommandResult(argv, 0, "", "")
         applied.append(mutation)
-        return _Completed(1, stderr="Database out of sync with JSONL")
+        return CommandResult(argv, 1, "", stderr="Database out of sync with JSONL")
 
     monkeypatch.setattr(module, "run_command", run)
     cli = BeadsCli(".beads")
@@ -116,13 +108,13 @@ def test_beads_cli_recovery_failures_are_bounded(
 
     calls: list[list[str]] = []
 
-    def run(*, argv: list[str], **kwargs: object) -> _Completed:
+    def run(*, argv: list[str], **kwargs: object) -> CommandResult:
         calls.append(argv)
         if len(calls) == 1 and failure != "command":
-            return _Completed(1, stderr="Database out of sync with JSONL")
+            return CommandResult(argv, 1, "", stderr="Database out of sync with JSONL")
         if len(calls) == 2 and failure == "retry":
-            return _Completed(0)
-        return _Completed(1, stderr="synthetic failure " + "x" * 2000)
+            return CommandResult(argv, 0, "", "")
+        return CommandResult(argv, 1, "", stderr="synthetic failure " + "x" * 2000)
 
     monkeypatch.setattr(module, "run_command", run)
     cli = BeadsCli(".beads")
@@ -150,7 +142,6 @@ def test_dry_run_never_imports_out_of_sync_database(
 ) -> None:
     import beadsflow.infra.beads_cli as module
     from beadsflow.entrypoints.cli import main
-    from beadsflow.infra.run_command import CommandResult
 
     monkeypatch.chdir(tmp_path)
     for key in list(os.environ):

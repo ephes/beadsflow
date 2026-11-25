@@ -23,9 +23,11 @@ independently. An initiating exception (including interruption) is re-raised wit
 bounded cleanup notes that contain no external exception text. An interruption
 (`KeyboardInterrupt`, `SystemExit`) that arrives during cleanup is re-raised after
 the remaining stages run, so a second Ctrl-C is never turned into an ordinary
-result. Other cleanup failures after ordinary completion raise a command error;
-internal `bd` and Zellij inventory commands report it as their own error type. An escaped descendant is outside
-the cleanup guarantee.
+result. If ordinary cleanup fails after a nonzero exit, the result retains the
+exit code and captured output with a bounded cleanup diagnostic. A zero or
+unknown exit status with failed cleanup raises a command error. Internal `bd`
+and Zellij inventory commands report cleanup failures as their own error type.
+An escaped descendant is outside the cleanup guarantee.
 See the [command contracts](docs/quickstart.md) for details.
 
 ## Dev quickstart

@@ -111,3 +111,19 @@ stop()
         for pid in map(int, pids.read_text().split()):
             with pytest.raises(ProcessLookupError):
                 os.kill(pid, 0)
+
+
+def test_allowed_git_exit_requires_complete_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    import beadsflow.infra.run_command as command_module
+
+    def run(**kwargs: Any) -> command_module.CommandResult:
+        kwargs["argv"] = [sys.executable, "-c", "import sys; print('partial evidence'); sys.exit(1)"]
+        return command_module.run_command(**kwargs)
+
+    def signal_failed(*args: object) -> None:
+        raise OSError("synthetic cleanup exception")
+
+    monkeypatch.setattr(command_module, "_signal_group", signal_failed)
+    monkeypatch.setattr(git_command, "run_command", run)
+    with pytest.raises(CommandError, match=r"git diff .* failed \(exit 1\): command cleanup incomplete"):
+        git_command.capture_git(["diff"], allow_exit={0, 1})

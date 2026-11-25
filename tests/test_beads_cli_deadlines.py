@@ -197,3 +197,44 @@ def test_cleanup_failure_after_completion_is_beads_error(
     assert ("outcome uncertain" in message) is not read
     assert "synthetic body" not in message
     assert caught.value.__context__ is None
+
+
+def test_beads_keeps_failed_child_status_when_group_cleanup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    import beadsflow.infra.beads_cli as module
+    import beadsflow.infra.run_command as command_module
+
+    script = (
+        "import sys; print('synthetic stdout'); print('Database out of sync with JSONL', file=sys.stderr); sys.exit(7)"
+    )
+    launches: list[tuple[str, ...]] = []
+    results: list[CommandResult] = []
+
+    def argv(self: BeadsCli, *args: str) -> list[str]:
+        launches.append(args)
+        return [sys.executable, "-c", script]
+
+    def signal_failed(*args: object) -> None:
+        raise OSError("synthetic cleanup exception")
+
+    def run(**kwargs: Any) -> CommandResult:
+        result = command_module.run_command(**kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr(BeadsCli, "_argv", argv)
+    monkeypatch.setattr(command_module, "_signal_group", signal_failed)
+    monkeypatch.setattr(module, "run_command", run)
+
+    with pytest.raises(BeadsError) as caught:
+        BeadsCli(".beads").get_issue("child-1")
+
+    assert str(caught.value) == "bd show child-1 failed (exit 7): command cleanup incomplete"
+    assert caught.value.__context__ is None
+    assert launches == [("--json", "show", "child-1")]
+    (result,) = results
+    assert result.returncode == 7
+    assert result.limit is None
+    assert result.stdout == "synthetic stdout\n"
+    assert "Database out of sync with JSONL" in result.stderr
+    assert "Command cleanup incomplete: SIGTERM signal failed; SIGKILL signal failed." in result.stderr
+    assert "synthetic cleanup exception" not in result.stderr

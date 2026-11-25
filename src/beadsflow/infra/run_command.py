@@ -93,6 +93,7 @@ class CommandResult:
     stderr: str
     # Set only when run_command itself stopped the command; a child's own 124/125 exit leaves it None.
     limit: Literal["timeout", "output"] | None = None
+    cleanup_incomplete: bool = False
 
 
 def run_command(
@@ -133,14 +134,14 @@ def run_command(
         cleanup.raise_interrupt()
         code = 125
         limit = "output"
-        notice = f"\nCommand output exceeded {max_output_bytes} bytes; capture truncated." + cleanup.notice()
+        notice = f"\nCommand output exceeded {max_output_bytes} bytes; capture truncated."
     except subprocess.TimeoutExpired:
         cleanup = _stop_group(process, output, max_output_bytes)
         cleanup.raise_interrupt()
         code = 124
         limit = "timeout"
         separator = "\n" if output[1] and not output[1].endswith(b"\n") else ""
-        notice = f"{separator}Timed out after {timeout_seconds} seconds." + cleanup.notice()
+        notice = f"{separator}Timed out after {timeout_seconds} seconds."
     except BaseException as exc:
         cleanup = _stop_group(process, output, max_output_bytes)
         if isinstance(exc, Exception):
@@ -152,15 +153,16 @@ def run_command(
             exc.add_note(cleanup_notice.strip())
         raise
     else:
-        code = _finish_group(process, output, max_output_bytes)
+        code, cleanup = _finish_group(process, output, max_output_bytes)
     return CommandResult(
         argv=argv,
         returncode=code,
         # Only successful stdout is admitted as machine-readable output.
         # Failure output is diagnostic and may end mid-character.
         stdout=_decode_output(bytes(output[0]), preserve_output=preserve_output, strict=strict_utf8 and code == 0),
-        stderr=_decode_output(bytes(output[1]), preserve_output=preserve_output) + notice,
+        stderr=_decode_output(bytes(output[1]), preserve_output=preserve_output) + notice + cleanup.notice(),
         limit=limit,
+        cleanup_incomplete=bool(cleanup.issues),
     )
 
 
@@ -251,14 +253,15 @@ def _signal_group(process: subprocess.Popen[bytes] | subprocess.Popen[str], sig:
             raise PermissionError("Cannot signal owned process group") from None
 
 
-def _finish_group(process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int) -> int:
+def _finish_group(
+    process: subprocess.Popen[bytes], output: tuple[bytearray, bytearray], limit: int
+) -> tuple[int, _CleanupLog]:
     cleanup = _stop_group(process, output, limit, completed=True)
     cleanup.raise_interrupt()
-    cleanup_notice = cleanup.notice()
-    if cleanup_notice:
-        raise CommandError(cleanup_notice.strip())
+    if cleanup.issues and process.returncode in (None, 0):
+        raise CommandError(cleanup.notice().strip())
     assert process.returncode is not None
-    return process.returncode
+    return process.returncode, cleanup
 
 
 def _cleanup_drain(

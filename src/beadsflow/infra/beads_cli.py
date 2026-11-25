@@ -146,6 +146,11 @@ class BeadsCli:
         if failure:
             raise BeadsError(failure)
         assert result is not None
+        if result.limit is None and result.cleanup_incomplete:
+            # Failed cleanup prevents recovery even when stderr suggests importing.
+            raise BeadsError(
+                _uncertain(f"{operation} failed (exit {result.returncode}): command cleanup incomplete", read=read)
+            )
         if result.limit == "timeout" or result.returncode == 124:
             # Completion is ambiguous: never recover/retry a timed-out command.
             raise BeadsError(f"{operation} timed out")
