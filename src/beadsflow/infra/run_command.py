@@ -156,9 +156,9 @@ def run_command(
     return CommandResult(
         argv=argv,
         returncode=code,
-        # Strict admission applies to the stdout of a completed command only; a
-        # stopped capture may end mid-character and stderr is diagnostic text.
-        stdout=_decode_output(bytes(output[0]), preserve_output=preserve_output, strict=strict_utf8 and limit is None),
+        # Only successful stdout is admitted as machine-readable output.
+        # Failure output is diagnostic and may end mid-character.
+        stdout=_decode_output(bytes(output[0]), preserve_output=preserve_output, strict=strict_utf8 and code == 0),
         stderr=_decode_output(bytes(output[1]), preserve_output=preserve_output) + notice,
         limit=limit,
     )

@@ -67,6 +67,28 @@ def test_strict_utf8_timeout_reports_timeout_not_decode_error() -> None:
     assert result.returncode == 124 and result.limit == "timeout"
 
 
+MALFORMED_STDOUT_COMMAND = (
+    "import os,sys; os.write(1,b'bad\\xff'); os.write(2,b'child diagnostic'); sys.exit(int(sys.argv[1]))"
+)
+
+
+def test_strict_utf8_preserves_failed_command_result() -> None:
+    argv = [sys.executable, "-c", MALFORMED_STDOUT_COMMAND]
+    result = run_command(argv=[*argv, "7"], timeout_seconds=3, env={}, strict_utf8=True)
+    assert result.returncode == 7 and result.limit is None
+    assert result.stdout == "bad\ufffd"
+    assert result.stderr == "child diagnostic"
+
+    with pytest.raises(UnicodeDecodeError):
+        run_command(argv=[*argv, "0"], timeout_seconds=3, env={}, strict_utf8=True)
+
+
+def test_bd_reports_exit_failure_with_malformed_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(BeadsCli, "_argv", lambda self, *args: [sys.executable, "-c", MALFORMED_STDOUT_COMMAND, "7"])
+    with pytest.raises(BeadsError, match=r"^bd show child failed \(exit 7\)$"):
+        BeadsCli(".beads").get_issue("child")
+
+
 def test_bd_json_preserves_valid_utf8_split_across_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = payload().replace(b"TEXT", "雪".encode())
     split = raw.index("雪".encode()) + 1

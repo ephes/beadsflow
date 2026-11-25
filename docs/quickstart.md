@@ -421,14 +421,14 @@ This policy covers automatic profile-failure and invalid-verdict diagnostics; co
 
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to 1.5 seconds for output draining and reaping. Timeouts, launch failures and cleanup failures after completion become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync `show` failure triggers automatic import/retry in normal runs. Comment and close failures never trigger recovery/replay; their outcome is uncertain, so read back the issue/comments before any manual retry; other failures stop immediately. Dry-run reads disable import recovery and stop with instructions to run `bd sync --import-only` explicitly before retrying. Dry runs leave the worktree and epic lock paths untouched and never invoke sync, profiles, comment or close. A preview uses the Beads and Git state observed during its reads. Concurrent changes can affect those reads or change what a later execution selects. `run.command_timeout_seconds` continues to apply only to profiles.
 
-Internal `bd` output is decoded as strict UTF-8 before JSON admission or recovery
-classification. Malformed/truncated sequences fail with a `BeadsError` naming only
-the operation (comment/close add the uncertain-outcome readback instruction);
-replacement characters are never substituted into structured evidence. Valid
-multibyte text split across process reads is preserved. Strict decoding covers stdout
-of completed commands only: timeouts and output caps are reported as such, and
-stderr stays diagnostic text. Profile display output
-retains its intentional replacement decoding.
+Successful `bd` stdout is decoded as strict UTF-8 before JSON admission. Malformed
+or truncated sequences fail with a `BeadsError` naming only the operation.
+Comment and close errors include the uncertain-outcome readback instruction.
+Valid multibyte text split across process reads is preserved. On failure, the
+runner preserves the exit code and bounded diagnostics even if stdout is malformed.
+The adapter can still classify an out-of-sync read using stderr. Timeout and
+output-cap results keep their corresponding status. Stderr and profile display
+output retain their tolerant decoding.
 
 `bd show` must return exactly one issue object whose ID exactly matches the requested
 full canonical ID. Short/partial IDs are no longer accepted. A backend identity mismatch
