@@ -109,6 +109,7 @@ def run_command(
         raise ValueError("max_output_bytes must be positive")
     if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be finite and positive")
+    deadline = time.monotonic() + timeout_seconds
     process = subprocess.Popen(
         list(argv),
         stdin=subprocess.DEVNULL,
@@ -124,7 +125,9 @@ def run_command(
     notice = ""
     limit: Literal["timeout", "output"] | None = None
     try:
-        _drain(process, output, timeout_seconds, max_output_bytes)
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired(process.args, timeout_seconds)
+        _drain(process, output, deadline, max_output_bytes)
     except _OutputLimitExceeded:
         cleanup = _stop_group(process, output, max_output_bytes)
         cleanup.raise_interrupt()
@@ -173,12 +176,11 @@ def _decode_output(value: bytes, *, preserve_output: bool, strict: bool = False)
 def _drain(
     process: subprocess.Popen[bytes],
     output: tuple[bytearray, bytearray],
-    timeout_seconds: float,
+    deadline: float,
     limit: int,
     *,
     fail_on_overflow: bool = True,
 ) -> None:
-    deadline = time.monotonic() + timeout_seconds
     with selectors.DefaultSelector() as selector:
         for pipe, buffer in zip((process.stdout, process.stderr), output, strict=True):
             if pipe is not None and not pipe.closed:
@@ -186,7 +188,7 @@ def _drain(
         while selector.get_map():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise subprocess.TimeoutExpired(process.args, timeout_seconds)
+                raise subprocess.TimeoutExpired(process.args, 0)
             for key, _events in selector.select(remaining):
                 chunk = os.read(key.fd, 65536)
                 if not chunk:
@@ -261,7 +263,7 @@ def _cleanup_drain(
     log: _CleanupLog,
 ) -> None:
     try:
-        _drain(process, output, min(0.5, max(0, deadline - time.monotonic())), limit, fail_on_overflow=False)
+        _drain(process, output, min(time.monotonic() + 0.5, deadline), limit, fail_on_overflow=False)
     except subprocess.TimeoutExpired:
         # Escaped descendants may retain pipe handles; do not await their EOF.
         pass

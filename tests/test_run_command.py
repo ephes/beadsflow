@@ -4,6 +4,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -55,6 +57,39 @@ def test_invalid_timeout_is_rejected_before_spawn(timeout_seconds: float, monkey
     monkeypatch.setattr(subprocess, "Popen", unexpected_spawn)
     with pytest.raises(ValueError, match="timeout_seconds must be finite and positive"):
         run_command(argv=[sys.executable, "-c", "pass"], timeout_seconds=timeout_seconds, env={})
+
+
+@pytest.mark.parametrize("launch_seconds", [2, 5, 6])
+def test_startup_counts_toward_timeout(launch_seconds: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    import beadsflow.infra.run_command as module
+
+    clock = 100.0
+    process = Mock(args=["synthetic-command"], stdout=None, stderr=None, returncode=0)
+    lifecycle = Mock()
+    lifecycle.attach_mock(process.wait, "reap")
+
+    def spawn(*args: object, **kwargs: object) -> Mock:
+        nonlocal clock
+        clock += launch_seconds
+        return process
+
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock))
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module, "_wait_for_exit", lifecycle.observe_exit)
+    monkeypatch.setattr(module, "_signal_group", lifecycle.signal_group)
+
+    result = run_command(argv=process.args, timeout_seconds=5, env={})
+
+    if launch_seconds < 5:
+        assert result.returncode == 0
+        lifecycle.observe_exit.assert_called_once_with(process, 5 - launch_seconds)
+    else:
+        assert result.returncode == 124
+        assert result.limit == "timeout"
+        assert result.stderr == "Timed out after 5 seconds."
+        assert lifecycle.mock_calls[0] == call.signal_group(process, signal.SIGTERM)
+        lifecycle.signal_group.assert_any_call(process, signal.SIGKILL)
+        lifecycle.reap.assert_called_once_with(timeout=module.CLEANUP_SECONDS)
 
 
 def test_background_command_gets_eof_without_consuming_launcher_input() -> None:
@@ -391,8 +426,9 @@ def test_unreapable_child_has_finite_cleanup(outcome: str, monkeypatch: pytest.M
                 raise module._OutputLimitExceeded
             raise subprocess.TimeoutExpired(process.args, 10)
         # Consume the allotted drain interval, simulating a child holding pipes open.
-        allowance = args[2]
-        assert isinstance(allowance, (int, float))
+        deadline = args[2]
+        assert isinstance(deadline, (int, float))
+        allowance = max(0, deadline - clock[0])
         clock[0] += allowance
         raise subprocess.TimeoutExpired(process.args, allowance)
 

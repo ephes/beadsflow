@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Count subprocess startup against the command deadline and retire the owned group if startup exhausts the budget.
 - Reject profile commands containing NUL or unencodable arguments during configuration loading, before launching processes.
 - Recheck epic child membership after verifying closed children and re-evaluate the epic if membership changed.
 - Preserve the original runner failure and attempt its Beads comment even if a logging handler raises.
