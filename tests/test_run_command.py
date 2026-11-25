@@ -5,7 +5,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, call
+from unittest.mock import MagicMock, Mock, call
 
 import pytest
 
@@ -90,6 +90,66 @@ def test_startup_counts_toward_timeout(launch_seconds: int, monkeypatch: pytest.
         assert lifecycle.mock_calls[0] == call.signal_group(process, signal.SIGTERM)
         lifecycle.signal_group.assert_any_call(process, signal.SIGKILL)
         lifecycle.reap.assert_called_once_with(timeout=module.CLEANUP_SECONDS)
+
+
+@pytest.mark.parametrize("late_stage", ["selector", "waitid"])
+def test_late_exit_observation_times_out_with_captured_output(
+    late_stage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import beadsflow.infra.run_command as module
+
+    clock = 100.0
+    pipe = Mock(closed=False)
+    pipe.close.side_effect = lambda: setattr(pipe, "closed", True)
+    process = Mock(args=["synthetic-command"], stdout=pipe, stderr=None, returncode=0, pid=123)
+    selector = Mock()
+    key = SimpleNamespace(fd=4, fileobj=pipe)
+    selector.register.side_effect = lambda _pipe, _event, data: setattr(key, "data", data)
+    selector.get_map.side_effect = lambda: not pipe.closed
+    selector.select.return_value = [(key, 1)]
+
+    def close_selector(*args: object) -> None:
+        nonlocal clock
+        if late_stage == "selector" and clock < 105:
+            clock = 105.1
+
+    def waitid(*args: object) -> object:
+        nonlocal clock
+        if late_stage == "waitid" and clock < 105:
+            clock = 105.1
+        return object()
+
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock))
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(
+        module,
+        "os",
+        SimpleNamespace(
+            environ={},
+            read=Mock(side_effect=[b"partial output", b""]),
+            P_PID=1,
+            WEXITED=2,
+            WNOWAIT=4,
+            WNOHANG=8,
+            waitid=waitid,
+        ),
+    )
+    selector_context = MagicMock()
+    selector_context.__enter__.return_value = selector
+    selector_context.__exit__.side_effect = close_selector
+    monkeypatch.setattr(module.selectors, "DefaultSelector", lambda: selector_context)
+    monkeypatch.setattr(module.subprocess, "Popen", Mock(return_value=process))
+    signal_group = Mock()
+    monkeypatch.setattr(module, "_signal_group", signal_group)
+
+    result = run_command(argv=process.args, timeout_seconds=5, env={})
+
+    assert result.returncode == 124
+    assert result.limit == "timeout"
+    assert result.stdout == "partial output"
+    assert result.stderr == "Timed out after 5 seconds."
+    assert signal_group.call_args_list == [call(process, signal.SIGTERM), call(process, signal.SIGKILL)]
+    process.wait.assert_called_once_with(timeout=module.CLEANUP_SECONDS)
 
 
 def test_background_command_gets_eof_without_consuming_launcher_input() -> None:

@@ -199,7 +199,13 @@ def _drain(
                 key.data[0].extend(chunk[:available])
                 if len(chunk) > available and fail_on_overflow:
                     raise _OutputLimitExceeded
-    _wait_for_exit(process, max(0, deadline - time.monotonic()))
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired(process.args, 0)
+    _wait_for_exit(process, remaining)
+    # A ready exit event can be returned after the original deadline.
+    if time.monotonic() >= deadline:
+        raise subprocess.TimeoutExpired(process.args, remaining)
 
 
 def _wait_for_exit(process: subprocess.Popen[bytes] | subprocess.Popen[str], timeout_seconds: float) -> None:

@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Treat subprocess exit observed at or after the command deadline as a timeout, retaining captured output.
 - Preserve the command's exit status and bounded diagnostics when a failed command emits malformed UTF-8 on stdout. Successful machine-readable stdout still requires valid UTF-8.
 - Count subprocess startup against the command deadline and retire the owned group if startup exhausts the budget.
 - Reject profile commands containing NUL or unencodable arguments during configuration loading, before launching processes.

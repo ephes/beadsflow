@@ -344,8 +344,10 @@ The shared command runner requires a finite, positive timeout in seconds. It
 raises `ValueError` before starting a subprocess if the timeout is invalid.
 The timeout starts before process creation. If process creation returns after the
 deadline, the runner immediately begins group cleanup and reports a timeout.
-The platform's process creation call can block past the deadline. Cleanup has its
-own allowance.
+The platform's process creation call can block past the deadline. Output draining
+and exit observation must finish before the same deadline. A late exit
+observation reports a timeout and retains captured output. Cleanup has its own
+allowance.
 
 Profile commands, standalone reviewers and internal Beads, Git and Zellij
 inventory commands run noninteractively with stdin connected to the null device.
