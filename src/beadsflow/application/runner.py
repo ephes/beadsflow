@@ -116,19 +116,15 @@ class EpicRunLoop:
         raise ConfigError(f"Reached max_iterations={max_iterations}")
 
     def _run_one_iteration(self, *, dry_run: bool) -> int | None:
-        epic = self.beads.get_issue(self.epic_id)
-        if epic.issue_type is not IssueType.EPIC:
-            raise ConfigError(f"{self.epic_id} is not an epic")
-
-        # Reverse dependents also include blockers and associations. Only an
-        # explicit parent-child edge belongs to this epic's automation lifetime.
-        epic = replace(
-            epic, dependents=[child for child in epic.dependents if child.dependency_type == "parent-child"]
-        )
+        epic = self._read_epic()
         cache: dict[str, Issue] = {}
         epic = self._refresh_completion_candidates(epic, cache=cache)
 
         if self._is_epic_complete(epic):
+            current_epic = self._read_epic()
+            if {child.id for child in current_epic.dependents} != {child.id for child in epic.dependents}:
+                self.logger.info("Epic membership changed during completion check; re-evaluating.")
+                return None
             self.logger.info("Epic complete.")
             return 0
 
@@ -160,6 +156,17 @@ class EpicRunLoop:
 
         self._dispatch(phase=phase, issue_id=next_work.issue_id)
         return None
+
+    def _read_epic(self) -> Issue:
+        epic = self.beads.get_issue(self.epic_id)
+        if epic.issue_type is not IssueType.EPIC:
+            raise ConfigError(f"{self.epic_id} is not an epic")
+
+        # Reverse dependents also include blockers and associations. Only an
+        # explicit parent-child edge belongs to this epic's automation lifetime.
+        return replace(
+            epic, dependents=[child for child in epic.dependents if child.dependency_type == "parent-child"]
+        )
 
     def _dispatch(self, *, phase: Phase, issue_id: str) -> None:
         match phase:

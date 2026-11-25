@@ -77,7 +77,7 @@ def test_only_parent_child_edges_own_epic_work(
         assert loop.run(once=True, dry_run=False, max_iterations=1) == (0 if complete or ready else 2)
     assert dispatched == (["child"] if ready else [])
     assert ("Epic complete." in caplog.text) == complete
-    assert reads.read_text().splitlines() == ["epic", "child"]
+    assert reads.read_text().splitlines() == (["epic", "child", "epic"] if complete else ["epic", "child"])
 
 
 @pytest.mark.parametrize("edge", [None, "", [], 1])

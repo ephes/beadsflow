@@ -511,7 +511,13 @@ than guessing ownership. This stricter requirement applies to reverse dependents
 legacy missing forward dependency types remain blocking as documented above.
 External blocking dependencies still gate an actual child's readiness.
 
-Before reporting an epic complete, the runner refreshes every child in an all-closed epic summary. Reopened children return to selection using the same per-iteration reads; a failed read stops completion. An empty epic is complete.
+Before reporting an epic complete, the runner refreshes every child in an all-closed
+epic summary. Reopened children return to selection using the same per-iteration
+reads. If all children are still closed, the runner rereads the epic and confirms
+that the set of parent-child IDs is unchanged. An empty epic also gets this
+membership check. A failed read stops completion. A membership change defers
+selection and completion to the next iteration, while `--once` ends without
+reporting completion.
 
 ### Beads JSON admission
 

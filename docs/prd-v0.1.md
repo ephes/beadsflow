@@ -104,7 +104,13 @@ This strategy should be configurable in the config file for v0.1 (see Config mod
 
 ### Epic completeness (v0.1)
 
-“Epic complete” is evaluated dynamically: on each iteration, re-enumerate the epic’s current children. Before declaring completion from all-closed summaries, refresh every listed child from `bd show`. A reopened child participates in selection using that same per-iteration read; read failures stop the run. The epic is complete only when all these authoritative children are closed. An empty epic is complete.
+Re-enumerate the epic’s current children on each iteration. Before declaring
+completion from all-closed summaries, refresh every listed child from `bd show`.
+A reopened child participates in selection using that same per-iteration read.
+When every child is closed, including when the epic is empty, reread the epic
+and confirm that the set of parent-child IDs is unchanged before reporting
+completion. A changed set defers evaluation to the next iteration, and read
+failures stop the run.
 
 ### `beadsflow session`
 

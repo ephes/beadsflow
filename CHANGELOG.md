@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Recheck epic child membership after verifying closed children and re-evaluate the epic if membership changed.
 - Reject invalid standalone review database-mode environment values before reading Beads.
 - Stop standalone review on out-of-sync Beads reads and advise explicit repair before retrying.
 - Preview epic runs without creating or updating worktree or epic locks.

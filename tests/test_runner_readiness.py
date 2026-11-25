@@ -147,7 +147,7 @@ def test_completion_refreshes_closed_summaries_once(
     )
     with caplog.at_level(logging.INFO):
         assert loop.run(once=True, dry_run=dry_run, max_iterations=1) == (2 if status is IssueStatus.BLOCKED else 0)
-    assert reads == ["epic", "child"]
+    assert reads == (["epic", "child", "epic"] if status is IssueStatus.CLOSED else ["epic", "child"])
     assert ("Epic complete." in caplog.text) == (status is IssueStatus.CLOSED)
     eligible = status in {IssueStatus.OPEN, IssueStatus.IN_PROGRESS}
     assert dispatched == (["child"] if eligible and not dry_run else [])
@@ -198,3 +198,43 @@ def test_empty_epic_completes_but_child_read_failure_stops(
             with pytest.raises(BeadsError, match="child read failure"):
                 loop.run(once=True, dry_run=False, max_iterations=1)
             assert "Epic complete." not in caplog.text
+
+
+def test_completion_rechecks_membership_after_reading_closed_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    closed = Issue("child-1", "Closed child", IssueStatus.CLOSED, 1, IssueType.TASK, now, now, [], [], [])
+    added = replace(closed, id="child-2", title="Added child", status=IssueStatus.OPEN)
+    epic = replace(
+        closed,
+        id="epic",
+        issue_type=IssueType.EPIC,
+        dependents=[IssueSummary(closed.id, closed.title, closed.status, 1, now, dependency_type="parent-child")],
+    )
+
+    class FakeBeads:
+        def get_issue(self, issue_id: str) -> Issue:
+            if issue_id == closed.id:
+                epic.dependents.append(
+                    IssueSummary(added.id, added.title, added.status, 1, now, dependency_type="parent-child")
+                )
+                return closed
+            return {epic.id: epic, added.id: added}[issue_id]
+
+    monkeypatch.setattr("beadsflow.application.runner.time.sleep", lambda _seconds: None)
+    loop = EpicRunLoop(
+        beads=FakeBeads(),  # type: ignore[arg-type]
+        epic_id=epic.id,
+        settings=Settings.defaults(),
+        repo_paths=RepoPaths(tmp_path, tmp_path / ".beads"),
+        implementer_name=None,
+        reviewer_name=None,
+        logger=logging.getLogger("test.completion"),
+    )
+
+    with caplog.at_level(logging.INFO):
+        assert loop.run(once=False, dry_run=True, max_iterations=2) == 0
+
+    assert "Epic complete." not in caplog.messages
+    assert f"Selected {added.id} (implement)." in caplog.messages
