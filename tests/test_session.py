@@ -15,6 +15,7 @@ class _Completed:
     stdout: str = ""
     stderr: str = ""
     limit: str | None = None
+    cleanup_incomplete: bool = False
 
 
 def test_session_start_missing_zellij_prints_manual_command(

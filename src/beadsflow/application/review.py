@@ -238,7 +238,8 @@ def _run_reviewer_command(
     if completed.limit == "output":
         raise CommandError(f"Reviewer command failed (exit 125): output exceeded {DEFAULT_MAX_OUTPUT_BYTES} bytes")
     if completed.returncode != 0:
-        raise CommandError(f"Reviewer command failed (exit {completed.returncode})")
+        cleanup = ": command cleanup incomplete" if completed.cleanup_incomplete else ""
+        raise CommandError(f"Reviewer command failed (exit {completed.returncode}){cleanup}")
     return completed.stdout or ""
 
 

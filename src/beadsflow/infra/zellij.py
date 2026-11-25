@@ -81,6 +81,8 @@ class Zellij:
             ) from exc
         except CommandError as exc:
             raise ZellijError(kind="failed", message="zellij list-sessions cleanup incomplete") from exc
+        if completed.limit is None and completed.cleanup_incomplete:
+            raise ZellijError(kind="failed", message="zellij list-sessions cleanup incomplete")
         if completed.limit == "timeout":
             raise ZellijError(
                 kind="failed", message=f"zellij list-sessions timed out after {CONTROL_TIMEOUT_SECONDS} seconds"

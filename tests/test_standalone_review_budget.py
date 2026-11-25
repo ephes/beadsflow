@@ -202,3 +202,13 @@ def test_prompt_budget_counts_utf8_bytes_at_boundary(monkeypatch: pytest.MonkeyP
 def test_unencodable_argv_context_is_a_controlled_refusal(prompt: str) -> None:
     with pytest.raises(CommandError, match="review context refused"):
         review._run_reviewer_command(cli_command="never-run", prompt_arg="-p", prompt=prompt)
+
+
+def test_reviewer_nonzero_exit_reports_incomplete_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    from beadsflow.infra.run_command import CommandResult
+
+    result = CommandResult(["synthetic"], 3, "LGTM", "private stderr", cleanup_incomplete=True)
+    monkeypatch.setattr(review, "run_command", lambda **kwargs: result)
+    with pytest.raises(CommandError) as caught:
+        review._run_reviewer_command(cli_command="synthetic", prompt_arg="-p", prompt="synthetic")
+    assert str(caught.value) == "Reviewer command failed (exit 3): command cleanup incomplete"

@@ -616,3 +616,24 @@ def test_implementer_change_check_failure_posts_trusted_comment(
         ("issue-1", "Implementer change check could not collect Git evidence; stopping. See local logs.")
     ]
     assert "secret-name.bin" in caplog.text
+
+
+def test_profile_failure_reports_incomplete_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from beadsflow.application import runner
+    from beadsflow.infra.run_command import CommandResult
+
+    loop = diagnostic_loop(tmp_path)
+    result = CommandResult(
+        argv=["synthetic"], returncode=7, stdout="private-output", stderr="err\udcff", cleanup_incomplete=True
+    )
+    monkeypatch.setattr(runner, "run_command", lambda **kwargs: result)
+    profile = Profile(CommandSpec(["synthetic"]), "stdout", "", "", False)
+
+    with pytest.raises(CommandError, match="^Reviewer failed with code 7; command cleanup incomplete$"):
+        loop._run_profile_command(profile=profile, issue_id="issue", phase="reviewer")
+
+    failure = "reviewer command failed (exit 7). Command cleanup incomplete; inspect owned processes before retrying."
+    assert loop.beads.comments == [("issue", failure)]  # type: ignore[attr-defined]
+    assert "private-output" not in caplog.text

@@ -364,8 +364,9 @@ class EpicRunLoop:
         failure = self._format_failure(phase, result, log_path=log_path)
         self._post_failure_comment(issue_id=issue_id, failure=failure)
         phase_label = phase.capitalize()
+        cleanup = "; command cleanup incomplete" if result.cleanup_incomplete else ""
         log_detail = f" (log: {log_path})" if log_path is not None else ""
-        raise CommandError(f"{phase_label} failed with code {result.returncode}{log_detail}")
+        raise CommandError(f"{phase_label} failed with code {result.returncode}{cleanup}{log_detail}")
 
     def _maybe_capture_git_signature(self, profile: Profile) -> str | None:
         if not profile.require_git_changes:
@@ -490,6 +491,9 @@ class EpicRunLoop:
 
     def _format_failure(self, phase: str, result: CommandResult, *, log_path: Path | None = None) -> str:
         message = f"{phase} command failed (exit {result.returncode})."
+        if result.cleanup_incomplete:
+            # Owned processes may remain; the operator must inspect them before retrying.
+            message += " Command cleanup incomplete; inspect owned processes before retrying."
         if log_path is not None:
             message += f"\n\nLog:\n{log_path}"
         return message

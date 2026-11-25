@@ -363,7 +363,10 @@ independently, even if an earlier step fails. An initiating exception, including
 only fixed stage categories. Timeout/output-limit results keep their original
 124/125 status and append the same diagnostic. If ordinary cleanup fails after a
 nonzero exit, the result retains the exit code and captured output with a bounded
-cleanup diagnostic. A zero or unknown exit status with failed cleanup raises a
+cleanup diagnostic. Runner profile failures (including their Beads failure
+comment) and the standalone reviewer helper then report `command cleanup
+incomplete` next to the exit code, and Zellij inventory reports a cleanup
+failure. A zero or unknown exit status with failed cleanup raises a
 command error. An interruption (`KeyboardInterrupt` or
 `SystemExit`) caught during cleanup is never converted into a result or command
 error: the remaining stages still run, then it is re-raised with the cleanup

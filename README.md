@@ -26,7 +26,9 @@ the remaining stages run, so a second Ctrl-C is never turned into an ordinary
 result. If ordinary cleanup fails after a nonzero exit, the result retains the
 exit code and captured output with a bounded cleanup diagnostic. A zero or
 unknown exit status with failed cleanup raises a command error. Internal `bd`
-and Zellij inventory commands report cleanup failures as their own error type.
+and Zellij inventory commands report cleanup failures as their own error type;
+runner profile failures, their Beads failure comments and standalone reviewer
+failures name the incomplete cleanup next to the exit code.
 An escaped descendant is outside the cleanup guarantee.
 See the [command contracts](docs/quickstart.md) for details.
 
