@@ -69,6 +69,13 @@ class CommandSpec:
             raise ConfigError("Invalid command quoting") from exc
         if not argv:
             raise ConfigError("Command is empty")
+        for arg in argv:
+            if "\0" in arg:
+                raise ConfigError("Command arguments must not contain NUL")
+            try:
+                os.fsencode(arg)
+            except UnicodeEncodeError:
+                raise ConfigError("Command arguments must be encodable for subprocess execution") from None
         return CommandSpec(argv=argv)
 
     def render(self, *, epic_id: str, issue_id: str) -> list[str]:

@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Reject profile commands containing NUL or unencodable arguments during configuration loading, before launching processes.
 - Recheck epic child membership after verifying closed children and re-evaluate the epic if membership changed.
 - Preserve the original runner failure and attempt its Beads comment even if a logging handler raises.
 - Reject invalid standalone review database-mode environment values before reading Beads.

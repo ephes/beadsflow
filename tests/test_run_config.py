@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,24 @@ def test_invalid_overrides_fail_before_work(
     with caplog.at_level(logging.ERROR, logger="beadsflow"):
         assert main(["run", "epic-1", "--once", *args]) == 1
     assert caplog.messages
+    assert not (isolated_run / ".beads" / "locks").exists()
+
+
+@pytest.mark.parametrize("command", [r"synthetic\u0000-tool arg", r"synthetic 'private\u0000 argument'"])
+def test_profile_nul_is_refused_before_work(
+    isolated_run: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, command: str
+) -> None:
+    path = isolated_run / "config.toml"
+    path.write_text(f'[implementers.fake]\ncommand = "{command}"\n', encoding="utf-8")
+
+    def unexpected_launch(*args: object, **kwargs: object) -> None:
+        pytest.fail("invalid profile config must fail before launching a subprocess")
+
+    monkeypatch.setattr(subprocess, "Popen", unexpected_launch)
+    assert main(["run", "epic-1", "--once", "--config", str(path)]) == 1
+    assert "Command arguments must not contain NUL" in caplog.messages
+    assert "synthetic" not in caplog.text
+    assert "private" not in caplog.text
     assert not (isolated_run / ".beads" / "locks").exists()
 
 

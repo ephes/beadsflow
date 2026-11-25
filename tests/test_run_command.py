@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from beadsflow.infra.run_command import run_command
+from beadsflow.application.errors import ConfigError
+from beadsflow.infra.run_command import CommandSpec, run_command
+
+
+def test_command_spec_refuses_unencodable_argument() -> None:
+    with pytest.raises(ConfigError, match="^Command arguments must be encodable for subprocess execution$"):
+        CommandSpec.from_string("synthetic 'private\ud800 argument'")
+
 
 # The parent owns/reaps its child on TERM. The child ignores TERM, exercising escalation.
 CHILD = """

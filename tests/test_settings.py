@@ -32,7 +32,7 @@ implementer = "codex"
 reviewer = "claude"
 
 [implementers.codex]
-command = "echo impl {issue_id}"
+command = "echo ' impl  {issue_id} ' '{epic_id}' ''"
 comment_mode = "stdout"
 comment_prefix = "Ready for review:\\n\\n"
 comment_suffix = "\\n\\nValidation:\\n- uv run pytest"
@@ -57,6 +57,8 @@ command_timeout_seconds = 12
     assert settings.reviewer == "claude"
     assert "codex" in settings.implementers
     profile = settings.implementers["codex"]
+    assert profile.command.argv == ["echo", " impl  {issue_id} ", "{epic_id}", ""]
+    assert profile.command.render(epic_id="epic-1", issue_id="issue-2") == ["echo", " impl  issue-2 ", "epic-1", ""]
     assert profile.comment_mode == "stdout"
     assert profile.comment_prefix.startswith("Ready for review")
     assert profile.comment_suffix.strip().startswith("Validation")

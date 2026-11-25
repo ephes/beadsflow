@@ -160,6 +160,9 @@ The standalone helper limits its reviewer command to 3600 seconds by default, ma
 ### Command execution semantics
 
 - `command` is **not** run via an implicit shell; it is parsed with `shlex.split(...)` into argv and executed directly.
+- Each parsed argument, including the executable, must be encodable for subprocess
+  execution and free of NUL characters. Invalid arguments fail configuration
+  loading before locking or launching processes. The diagnostic omits argument values.
 - If you want shell features (pipes, heredocs, `set -euo pipefail`, etc.), wrap your command explicitly: `bash -lc '...'`.
 - `{epic_id}` and `{issue_id}` in the configured argv are substituted per run,
   after argv parsing. Direct-argv placeholders remain single arguments; substitution
