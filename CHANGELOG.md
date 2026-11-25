@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Escape control and other nonprintable characters in bounded Beads command labels so errors stay on one terminal line.
 - Check private command log basenames against the destination directory filename limit before staging any diagnostic content.
 - Preserve a reaped command's nonzero exit and captured output when ordinary cleanup fails. Report the exit and cleanup status for Beads failures without automatically retrying.
 - Treat subprocess exit observed at or after the command deadline as a timeout, retaining captured output.

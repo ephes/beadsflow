@@ -428,6 +428,10 @@ This policy covers automatic profile-failure and invalid-verdict diagnostics; co
 
 Internal `bd` operations (`show`, comment, close, and import-only recovery) have a separate 30-second total deadline per operation, including the one permitted out-of-sync recovery and retry. Cleanup uses the same bounded TERM/KILL process-group handling as runner profiles and may add up to 1.5 seconds for output draining and reaping. Timeouts, launch failures and cleanup failures after completion become `BeadsError` diagnostics naming the operation and issue (excluding comment bodies); epic runs exit nonzero and release their lock. A reaped child's nonzero status appears in the cleanup error. Failed cleanup also prevents automatic import and retry. Timed-out commands are never retried, because a comment or close may already have taken effect. Check Beads state before retrying manually. Only an explicit out-of-sync `show` failure triggers automatic import/retry in normal runs. Comment and close failures never trigger recovery/replay; their outcome is uncertain, so read back the issue/comments before any manual retry; other failures stop immediately. Dry-run reads disable import recovery and stop with instructions to run `bd sync --import-only` explicitly before retrying. Dry runs leave the worktree and epic lock paths untouched and never invoke sync, profiles, comment or close. A preview uses the Beads and Git state observed during its reads. Concurrent changes can affect those reads or change what a later execution selects. `run.command_timeout_seconds` continues to apply only to profiles.
 
+Beads command labels escape control and other nonprintable characters on a
+single line. The escaped issue display is capped at 200 characters. The
+subprocess receives the original arguments, including any comment body.
+
 Successful `bd` stdout is decoded as strict UTF-8 before JSON admission. Malformed
 or truncated sequences fail with a `BeadsError` naming only the operation.
 Comment and close errors include the uncertain-outcome readback instruction.

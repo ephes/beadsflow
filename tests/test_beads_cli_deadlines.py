@@ -238,3 +238,30 @@ def test_beads_keeps_failed_child_status_when_group_cleanup_fails(monkeypatch: p
     assert "Database out of sync with JSONL" in result.stderr
     assert "Command cleanup incomplete: SIGTERM signal failed; SIGKILL signal failed." in result.stderr
     assert "synthetic cleanup exception" not in result.stderr
+
+
+def test_command_error_escapes_issue_on_one_line_without_changing_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    import beadsflow.infra.beads_cli as module
+
+    prefix = "child-1\nforged\r\t\x1b[31m\u0085\u2028"
+    issue_id = prefix + "x" * 300
+    body = "synthetic comment body\nomitted"
+    calls: list[list[str]] = []
+
+    def run(*, argv: list[str], **kwargs: Any) -> CommandResult:
+        calls.append(argv)
+        return CommandResult(argv, 7, "", "synthetic stderr")
+
+    monkeypatch.setattr(module, "run_command", run)
+    with pytest.raises(BeadsError) as caught:
+        BeadsCli(".beads").comment(issue_id, body)
+
+    assert calls == [["bd", "--no-daemon", "comments", "add", issue_id, body]]
+    message = str(caught.value)
+    assert message.splitlines() == [message]
+    escaped_prefix = r"child-1\nforged\r\t\x1b[31m\x85\u2028"
+    escaped = escaped_prefix.ljust(200, "x")
+    assert message == (
+        f"bd comments add '{escaped}' failed (exit 7); "
+        "outcome uncertain; read back Beads state before any manual retry."
+    )

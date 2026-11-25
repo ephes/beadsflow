@@ -93,6 +93,18 @@ def _records(raw: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return records
 
 
+def _diagnostic_arg(value: str) -> str:
+    parts: list[str] = []
+    remaining = 200
+    for char in value:
+        escaped = char if char.isprintable() else ascii(char)[1:-1]
+        if len(escaped) > remaining:
+            break
+        parts.append(escaped)
+        remaining -= len(escaped)
+    return "".join(parts)
+
+
 def _uncertain(failure: str, *, read: bool) -> str:
     if read:
         return failure
@@ -164,7 +176,7 @@ class BeadsCli:
         diagnostic_args = args[1:] if args[0] == "--json" else args
         # Include the operation and issue, but never a comments-add body.
         count = 3 if diagnostic_args[0] == "comments" else 2
-        operation = "bd " + shlex.join(arg[:200] for arg in diagnostic_args[:count])
+        operation = "bd " + shlex.join(_diagnostic_arg(arg) for arg in diagnostic_args[:count])
         read = diagnostic_args[0] == "show"
         completed = self._execute(argv, deadline=deadline, operation=operation, read=read)
         if completed.returncode != 0 and self._is_db_out_of_sync(completed.stderr):
