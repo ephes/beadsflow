@@ -397,8 +397,10 @@ a hidden `.tmp` file, and a failure after publication can leave a complete
 `.log` without a reported path. Inspect and remove these artifacts manually,
 including in a renamed directory. Retries use a fresh name.
 If a log cannot be written safely, beadsflow still reports the original profile failure
-and posts its failure comment without a log path. If the log content cannot be
-encoded as UTF-8, the console reports a fixed encoding error that includes no log content.
+and attempts its failure comment without a log path. If the log content cannot be
+encoded as UTF-8, the runner emits a fixed encoding error that includes no log content.
+If a logging handler raises while emitting a failure diagnostic, the runner still
+attempts the Beads comment and preserves the original failure.
 Normal and dry-run progress messages omit profile arguments. Commands can still print
 sensitive output. Automatic runner failure comments and default console errors contain only trusted phase/exit or verdict-validation diagnostics and a private log reference; they never include raw stdout/stderr excerpts. Invalid, empty or verdict-changing truncated stdout is likewise logged privately instead of copied into a failure comment. If a comment cannot be posted, only the exception type is logged and the primary failure remains the outcome. Read the referenced local log for details. Standalone reviewer failures and internal `bd` failures (including import recovery)
 also expose only bounded operation/exit/category metadata. Their public errors

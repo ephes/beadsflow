@@ -157,12 +157,13 @@ locked out, so edits after the final close check can still race with close. Pref
 published by the runner after the check; command-mode profiles own their direct
 Beads side effects and must be inspected before retrying a rejected review.
 
-Automatic runner failures (including invalid or truncated verdicts) post only a
-trusted phase/exit or verdict-validation error and private log reference. Raw process output stays in
-the protected local log, not failure comments or default console errors. A failed
-comment attempt preserves the primary failure. Valid stdout comments are still
-published as configured. The standalone review helper's output is not itself a
-runner execution fence.
+For automatic runner failures (including invalid or truncated verdicts), the
+runner attempts a comment containing only a trusted phase/exit or
+verdict-validation error and a private log reference when available. Raw process
+output stays in the protected local log. The runner attempts the comment even if
+a logging handler raises and preserves the primary failure if comment
+publication fails. Valid stdout comments are still published as configured.
+The standalone review helper's output is not itself a runner execution fence.
 
 ### Issue requirements in review evidence
 

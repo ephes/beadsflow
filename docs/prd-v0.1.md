@@ -276,7 +276,11 @@ When a bead is selected, the next phase is determined by the most recent coordin
 
 If the implementer or reviewer command fails (non-zero exit, timeout, or other execution error):
 
-- Post a comment on the child bead with trusted phase/exit or verdict-validation error and a private local log reference when available. Raw process output and invalid-verdict excerpts remain in protected logs, never automatic failure comments/default console errors. Comment-posting failures do not replace the primary outcome.
+- Attempt a comment on the child bead with trusted phase/exit or verdict-validation
+  error and a private local log reference when available. Keep raw process output
+  and invalid-verdict excerpts in the protected logs. Preserve the primary runner
+  failure if writing the diagnostic file, emitting a failure message or posting
+  the comment fails.
 - Default behavior is to stop the run and exit non-zero (`on_command_failure = "stop"`).
 - No automatic retries in v0.1 (retries/backoff can be added later once the basic behavior is stable).
 

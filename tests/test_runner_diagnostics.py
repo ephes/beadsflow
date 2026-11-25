@@ -516,6 +516,51 @@ def test_log_encoding_failure_preserves_profile_failure(
     ]
 
 
+@pytest.mark.parametrize("write_fails", [False, True])
+@pytest.mark.parametrize("comment_fails", [False, True])
+def test_throwing_error_handler_preserves_profile_failure(
+    tmp_path: Path, write_fails: bool, comment_fails: bool
+) -> None:
+    import logging
+    import sys
+    from dataclasses import replace
+
+    from beadsflow.application.errors import BeadsError
+
+    attempts: list[tuple[str, str]] = []
+    diagnostics: list[str] = []
+
+    class FakeBeads:
+        def comment(self, issue_id: str, text: str) -> None:
+            attempts.append((issue_id, text))
+            if comment_fails:
+                raise BeadsError("Synthetic comment failure")
+
+    class FailingHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            diagnostics.append(record.getMessage())
+            raise OSError("Synthetic logging failure")
+
+    logger = logging.Logger("test.throwing-diagnostics", level=logging.ERROR)
+    logger.addHandler(FailingHandler())
+    loop = replace(diagnostic_loop(tmp_path), logger=logger, beads=FakeBeads())  # type: ignore[arg-type]
+    if write_fails:
+        loop.repo_paths.beads_dir.write_text("Obstruct diagnostic directory")
+    profile = Profile(CommandSpec([sys.executable, "-c", "raise SystemExit(7)"]), "command", "", "", False)
+
+    with pytest.raises(CommandError, match=r"^Reviewer failed with code 7(?: \(log: .+\))?$"):
+        loop._run_profile_command(profile=profile, issue_id="issue", phase="reviewer")
+
+    assert len(attempts) == 1
+    issue_id, comment = attempts[0]
+    assert issue_id == "issue"
+    assert comment.startswith("reviewer command failed (exit 7).")
+    assert ("\n\nLog:\n" in comment) is not write_fails
+    assert comment in diagnostics
+    assert any(message.startswith("Cannot write diagnostic log") for message in diagnostics) is write_fails
+    assert ("Failed to post failure comment to Beads (BeadsError)" in diagnostics) is comment_fails
+
+
 def test_implementer_change_check_failure_posts_trusted_comment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

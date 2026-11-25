@@ -6,6 +6,7 @@ import os
 import shutil
 import textwrap
 import time
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -378,7 +379,7 @@ class EpicRunLoop:
             after_sig = self._git_signature()
         except CommandError as exc:
             # Path-bearing details stay in the local log; the bead gets a trusted message.
-            self.logger.error(str(exc))
+            self._log_failure(str(exc))
             failure = "Implementer change check could not collect Git evidence; stopping. See local logs."
             self._post_failure_comment(issue_id=issue_id, failure=failure)
             raise CommandError(failure) from exc
@@ -494,17 +495,22 @@ class EpicRunLoop:
         return message
 
     def _post_failure_comment(self, *, issue_id: str, failure: str) -> None:
-        self.logger.error(failure)
+        self._log_failure(failure)
         try:
             self.beads.comment(issue_id, failure)
         except Exception as exc:  # noqa: BLE001
-            self.logger.error(f"Failed to post failure comment to Beads ({type(exc).__name__})")
+            self._log_failure(f"Failed to post failure comment to Beads ({type(exc).__name__})")
+
+    def _log_failure(self, message: str) -> None:
+        # A logging handler may fail while the runner is reporting a primary error.
+        with suppress(Exception):
+            self.logger.error(message)
 
     def _try_write_command_log(self, *, issue_id: str, phase: str, result: CommandResult) -> Path | None:
         try:
             return self._write_command_log(issue_id=issue_id, phase=phase, result=result)
         except CommandError as exc:
-            self.logger.error(str(exc))
+            self._log_failure(str(exc))
             return None
 
     def _write_command_log(self, *, issue_id: str, phase: str, result: CommandResult) -> Path:
