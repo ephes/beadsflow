@@ -393,11 +393,14 @@ entry, including a symlink back to the original file, suppresses the log path.
 The check covers those entries at completion. The trusted ancestor prefix is
 resolved once, and later path changes remain possible.
 Failed profile diagnostics are written to hidden mode-0600 staging files in the
-private log directory. Only after the stream closes successfully does beadsflow
-publish the `.log` name, and a file already at that name is preserved. Beadsflow
-attempts to remove the staging file. A cleanup failure or abrupt exit can leave
-a hidden `.tmp` file, and a failure after publication can leave a complete
-`.log` without a reported path. Inspect and remove these artifacts manually,
+private log directory. Beadsflow closes the stream and syncs the staged file
+before linking the `.log` name. A file already at that name is preserved.
+Beadsflow attempts to remove the staging name, then syncs the log directory and
+each parent up to and including the trusted parent before reporting the path.
+If a directory sync fails after linking, beadsflow reports uncertain durability,
+keeps the `.log` file, and omits its path. Other failures after linking can also
+leave a complete `.log` without a reported path. A cleanup failure or abrupt exit
+can leave a hidden `.tmp` file. Inspect and remove these artifacts manually,
 including in a renamed directory. Retries use a fresh name.
 If a log cannot be written safely, beadsflow still reports the original profile failure
 and attempts its failure comment without a log path. If the log content cannot be

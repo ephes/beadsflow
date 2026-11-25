@@ -11,6 +11,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Reject profile commands containing NUL or unencodable arguments during configuration loading, before launching processes.
 - Recheck epic child membership after verifying closed children and re-evaluate the epic if membership changed.
 - Preserve the original runner failure and attempt its Beads comment even if a logging handler raises.
+- Sync staged diagnostic content and its directory entries before reporting a log path. If a directory sync fails after linking, preserve the original command failure and leave the private log in place without reporting its path.
 - Reject invalid standalone review database-mode environment values before reading Beads.
 - Stop standalone review on out-of-sync Beads reads and advise explicit repair before retrying.
 - Preview epic runs without creating or updating worktree or epic locks.

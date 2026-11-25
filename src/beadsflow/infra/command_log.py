@@ -50,15 +50,27 @@ def _write_private(*, beads_dir: Path, prefix: str, content: str) -> Path:
         fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
         # Keep the inode pinned through publication and staged-name cleanup.
         descriptors.callback(os.close, fd)
-        descriptors.callback(_remove_staged, directory, staged, fd)
-        with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
-            handle.write(content)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
+                handle.write(content)
+            os.fsync(fd)
 
-        if not _matches_inode(directory, staged, fd):
-            raise OSError("Staged diagnostic changed during log creation")
-        # Publish only after the stream closes successfully. Linking is exclusive
-        # at the destination, so a concurrently created file is left untouched.
-        os.link(staged, name, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
+            if not _matches_inode(directory, staged, fd):
+                raise OSError("Staged diagnostic changed during log creation")
+            # Linking is exclusive at the destination.
+            os.link(staged, name, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
+        finally:
+            _remove_staged(directory, staged, fd)
+
+        # Persist the log name and its directory chain, including entries that
+        # may have been created by an earlier interrupted or concurrent writer.
+        try:
+            os.fsync(directory)
+            for parent, _, _ in reversed(chain):
+                os.fsync(parent)
+        except OSError:
+            raise CommandError("Cannot confirm durability of published diagnostic log") from None
+
         # Check name identity at completion. This does not lock the path.
         for parent, component, child in chain:
             if not _matches_inode(parent, component, child):

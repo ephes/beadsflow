@@ -20,11 +20,13 @@ class Resources:
     """Observe public descriptor ownership without /proc or platform fd counts."""
 
     active: dict[int, int] = field(default_factory=dict)
+    labels: list[str] = field(default_factory=list)
     acquired: list[int] = field(default_factory=list)
     released: list[int] = field(default_factory=list)
     fault: str = ""
     hits: list[str] = field(default_factory=list)
     interleave: Callable[[str], None] = lambda _: None
+    real_fsync: Callable[[int], None] = os.fsync
 
     def boundary(self, name: str) -> None:
         self.hits.append(name)
@@ -34,6 +36,10 @@ class Resources:
 
     def release(self, fd: int) -> None:
         self.released.append(self.active.pop(fd))
+
+    def fsync(self, fd: int) -> None:
+        self.boundary(f"sync:{self.labels[self.active[fd]]}")
+        self.real_fsync(fd)
 
 
 @dataclass
@@ -75,6 +81,7 @@ def resources(monkeypatch: pytest.MonkeyPatch) -> Iterator[Resources]:
         assert fd not in resources.active
         generation = len(resources.acquired)
         resources.acquired.append(generation)
+        resources.labels.append(label)
         resources.active[fd] = generation
         resources.boundary(f"opened:{label}")
         return fd
@@ -115,6 +122,7 @@ def resources(monkeypatch: pytest.MonkeyPatch) -> Iterator[Resources]:
     monkeypatch.setattr(command_log.os, "fchmod", fchmod)
     monkeypatch.setattr(command_log.os, "fdopen", fdopen)
     monkeypatch.setattr(command_log.os, "link", link)
+    monkeypatch.setattr(command_log.os, "fsync", resources.fsync)
     yield resources
     # Also clean up if the production bug leaks a descriptor during a red run.
     for fd in list(resources.active):
@@ -245,6 +253,32 @@ def test_success_releases_resources(tmp_path: Path, resources: Resources) -> Non
     assert_released(resources)
 
 
+def test_receipt_follows_file_link_and_directory_syncs(tmp_path: Path, resources: Resources) -> None:
+    directory = tmp_path / ".beads" / "logs" / "beadsflow"
+
+    def inspect_names(event: str) -> None:
+        if event == "sync:file":
+            (staged,) = directory.glob(".*.tmp")
+            assert staged.read_text() == _PRIVATE
+            assert not list(directory.glob("*.log"))
+        if event == "sync:beadsflow":
+            assert not list(directory.glob(".*.tmp"))
+            (published,) = directory.glob("*.log")
+            assert published.read_text() == _PRIVATE
+
+    resources.interleave = inspect_names
+    assert write_log(tmp_path).is_file()
+    assert [event for event in resources.hits if event.startswith("sync:") or event == "linked:file"] == [
+        "sync:file",
+        "linked:file",
+        "sync:beadsflow",
+        "sync:logs",
+        "sync:.beads",
+        "sync:root",
+    ]
+    assert_released(resources)
+
+
 @pytest.mark.parametrize(
     ("fault", "occupy_final"),
     [("write", False), ("close:file", False), ("write", True), ("", True)],
@@ -278,7 +312,19 @@ def test_failed_publication_preserves_existing_logs(
 
 
 @pytest.mark.parametrize(
-    "boundary", ["fchmod", "fdopen", "write", "close:file", "close:directory", "replace:stage", "replace:file"]
+    "boundary",
+    [
+        "fchmod",
+        "fdopen",
+        "write",
+        "close:file",
+        "close:directory",
+        "replace:stage",
+        "replace:file",
+        "sync:file",
+        "sync:beadsflow",
+        "sync:root",
+    ],
 )
 def test_runner_preserves_primary_failure_when_log_cannot_be_reported(
     tmp_path: Path,
@@ -342,4 +388,15 @@ def test_runner_preserves_primary_failure_when_log_cannot_be_reported(
     assert "command failed (exit 7)" in beads.comments[0]
     assert "Log:" not in beads.comments[0]
     assert _PRIVATE not in beads.comments[0]
+    if boundary.startswith("sync:"):
+        directory = tmp_path / ".beads" / "logs" / "beadsflow"
+        assert not list(directory.glob(".*.tmp"))
+        if boundary == "sync:file":
+            assert not list(directory.glob("*.log"))
+            assert "Cannot write diagnostic log: unsafe directory or I/O failure" in caplog.messages
+        else:
+            (published,) = directory.glob("*.log")
+            assert _PRIVATE in published.read_text()
+            assert stat.S_IMODE(published.stat().st_mode) == 0o600
+            assert "Cannot confirm durability of published diagnostic log" in caplog.messages
     assert_released(resources)
