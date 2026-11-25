@@ -42,10 +42,12 @@ def _write_private(*, beads_dir: Path, prefix: str, content: str) -> Path:
             directory = child
         if os.fstat(directory).st_uid != os.getuid():
             raise OSError("Diagnostic directory is not owned by the current user")
-        os.fchmod(directory, 0o700)
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         token = secrets.token_hex(16)
         name = f"{prefix}{timestamp}.{token}.log"
+        _check_basename(directory, name)
+
+        os.fchmod(directory, 0o700)
         staged = f".{token}.tmp"
         fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
         # Keep the inode pinned through publication and staged-name cleanup.
@@ -78,6 +80,14 @@ def _write_private(*, beads_dir: Path, prefix: str, content: str) -> Path:
         if not _matches_inode(directory, name, fd):
             raise OSError("Diagnostic file changed during log creation")
         return beads_dir / "logs" / "beadsflow" / name
+
+
+def _check_basename(directory: int, name: str) -> None:
+    name_max = os.fpathconf(directory, "PC_NAME_MAX")
+    if name_max < 0:
+        raise CommandError("Cannot write diagnostic log: filename length limit unavailable")
+    if len(os.fsencode(name)) > name_max:
+        raise CommandError("Cannot write diagnostic log: filename exceeds directory name limit")
 
 
 def _matches_inode(directory: int, name: str, fd: int) -> bool:

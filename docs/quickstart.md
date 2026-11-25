@@ -400,6 +400,9 @@ still refer directly to the inode that received the log. A missing or replaced
 entry, including a symlink back to the original file, suppresses the log path.
 The check covers those entries at completion. The trusted ancestor prefix is
 resolved once, and later path changes remain possible.
+Before opening a staging file, beadsflow checks the full log basename against
+the opened directory's filename byte limit. An overlong basename or unavailable
+limit produces a fixed diagnostic without echoing the issue or phase.
 Failed profile diagnostics are written to hidden mode-0600 staging files in the
 private log directory. Beadsflow closes the stream and syncs the staged file
 before linking the `.log` name. A file already at that name is preserved.

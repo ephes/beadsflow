@@ -253,6 +253,27 @@ def test_success_releases_resources(tmp_path: Path, resources: Resources) -> Non
     assert_released(resources)
 
 
+@pytest.mark.parametrize("extra_bytes", [0, 1])
+def test_log_basename_limit_applies_before_staging(tmp_path: Path, resources: Resources, extra_bytes: int) -> None:
+    name_max = os.pathconf(tmp_path, "PC_NAME_MAX")
+    fixed_bytes = len("..20260101-000000." + "0" * 32 + ".log")
+    component_bytes = name_max - fixed_bytes
+    issue = "i" * (component_bytes // 2 + extra_bytes)
+    phase = "p" * (component_bytes - component_bytes // 2)
+    beads_dir = tmp_path / ".beads"
+    if extra_bytes:
+        with pytest.raises(CommandError) as caught:
+            command_log.write_command_log(beads_dir=beads_dir, issue_id=issue, phase=phase, content=_PRIVATE)
+        assert "open:file" not in resources.hits
+        assert not list((beads_dir / "logs" / "beadsflow").iterdir())
+        assert str(caught.value) == "Cannot write diagnostic log: filename exceeds directory name limit"
+    else:
+        path = command_log.write_command_log(beads_dir=beads_dir, issue_id=issue, phase=phase, content=_PRIVATE)
+        assert len(os.fsencode(path.name)) == name_max
+        assert path.read_text() == _PRIVATE
+    assert_released(resources)
+
+
 def test_receipt_follows_file_link_and_directory_syncs(tmp_path: Path, resources: Resources) -> None:
     directory = tmp_path / ".beads" / "logs" / "beadsflow"
 
