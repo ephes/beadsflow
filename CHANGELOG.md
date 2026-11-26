@@ -8,6 +8,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 
+- Preserve untracked file and ancestor change refusals through directory descriptor cleanup, and report the first close failure when cleanup alone fails.
 - Escape control and other nonprintable characters in bounded Beads command labels so errors stay on one terminal line.
 - Check private command log basenames against the destination directory filename limit before staging any diagnostic content.
 - Preserve a reaped command's nonzero exit and captured output when ordinary cleanup fails. Report the exit and cleanup status for Beads, Git, Zellij inventory, runner profile and standalone reviewer failures; Beads failures are never retried automatically.

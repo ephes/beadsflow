@@ -494,8 +494,10 @@ directory descriptors and recheck each ancestor's name, device, inode and mode,
 from the selected resolved worktree root through the leaf's parent, before
 returning evidence. Renaming or replacing any of those directories (including
 substitution with a symlink) refuses evidence even if the detached leaf is
-unchanged. All retained descriptors close on success or failure; ancestor
-traversal and revalidation share the existing fingerprint deadline.
+unchanged. Closing is attempted once for every retained directory descriptor.
+An earlier evidence refusal remains the reported error if a directory close also
+fails. A close failure on its own raises a command error. Ancestor traversal and
+revalidation share the existing fingerprint deadline.
 Deadline checks run between entries, path components and
 read chunks; they do not interrupt a blocked filesystem syscall. Incomplete
 evidence raises a command error without publishing approval or closing an issue,

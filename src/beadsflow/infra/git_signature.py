@@ -66,16 +66,26 @@ def _untracked_parent(root: Path, relative: str, budget: FingerprintBudget) -> I
     parts = relative.removesuffix("/").split("/")
     if any(part in {"", ".", ".."} for part in parts):
         raise CommandError("Unsafe untracked Git path")
+    close_error: OSError | None = None
+
+    def close_directory(fd: int) -> None:
+        nonlocal close_error
+        try:
+            os.close(fd)
+        except OSError as exc:
+            if close_error is None:
+                close_error = exc
+
     try:
         with ExitStack() as descriptors:
             resolved = root.resolve()
             directory = os.open(resolved.parent, os.O_RDONLY | os.O_DIRECTORY)
-            descriptors.callback(os.close, directory)
+            descriptors.callback(close_directory, directory)
             ancestors: list[tuple[int, str, os.stat_result]] = []
             for part in [resolved.name or ".", *parts[:-1]]:
                 budget.check()
                 child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
-                descriptors.callback(os.close, child)
+                descriptors.callback(close_directory, child)
                 ancestors.append((directory, part, os.fstat(child)))
                 directory = child
             yield directory, parts[-1]
@@ -85,6 +95,8 @@ def _untracked_parent(root: Path, relative: str, budget: FingerprintBudget) -> I
                 if (opened.st_dev, opened.st_ino, opened.st_mode) != (named.st_dev, named.st_ino, named.st_mode):
                     raise CommandError("Untracked ancestor changed during fingerprinting")
             budget.check()
+        if close_error is not None:
+            raise close_error
     except OSError as exc:
         raise CommandError(f"Cannot fingerprint untracked path: {relative}") from exc
 

@@ -328,6 +328,63 @@ def test_untracked_ancestor_replacement_is_refused(
     assert path.read_bytes() == (b"reviewed" if substitution == "symlink" else b"replacement")
 
 
+@pytest.mark.parametrize("replace_entry", [True, False])
+def test_untracked_source_preserves_first_failure_during_ancestor_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replace_entry: bool
+) -> None:
+    import beadsflow.infra.git_signature as signatures
+
+    entry = tmp_path / "nested" / "entry"
+    entry.parent.mkdir()
+    entry.write_text("original")
+    replacement = tmp_path / "replacement"
+    replacement.write_text("replacement")
+    original_open = os.open
+    original_close = os.close
+    original_stat = os.stat
+    directories: list[int] = []
+    closed: list[int] = []
+    close_errors = [OSError("inner close failed"), OSError("outer close failed")]
+    entry_stats = 0
+
+    def open_entry(name: str | Path, flags: int, *, dir_fd: int | None = None) -> int:
+        fd = original_open(name, flags, dir_fd=dir_fd)
+        if flags & os.O_DIRECTORY:
+            directories.append(fd)
+        return fd
+
+    def stat_entry(
+        name: str | Path | int, *, dir_fd: int | None = None, follow_symlinks: bool = True
+    ) -> os.stat_result:
+        nonlocal entry_stats
+        if name == entry.name and dir_fd is not None:
+            entry_stats += 1
+            if replace_entry and entry_stats == 2:
+                replacement.replace(entry)
+        return original_stat(name, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+
+    def close_directory(fd: int) -> None:
+        original_close(fd)
+        if fd in directories:
+            closed.append(fd)
+            if len(closed) <= len(close_errors):
+                raise close_errors[len(closed) - 1]
+
+    monkeypatch.setattr(signatures.os, "open", open_entry)
+    monkeypatch.setattr(signatures.os, "stat", stat_entry)
+    monkeypatch.setattr(signatures.os, "close", close_directory)
+    with pytest.raises(CommandError) as error:
+        signatures.untracked_source(tmp_path, "nested/entry", budget=signatures.FingerprintBudget.start())
+
+    assert len(directories) == 3
+    assert closed == directories[::-1]
+    if replace_entry:
+        assert str(error.value) == "Untracked file changed during fingerprinting"
+    else:
+        assert str(error.value) == "Cannot fingerprint untracked path: nested/entry"
+        assert error.value.__cause__ is close_errors[0]
+
+
 def test_unchanged_nested_untracked_evidence(tmp_path: Path) -> None:
     from beadsflow.infra.git_signature import FingerprintBudget, untracked_signature, untracked_source
 
