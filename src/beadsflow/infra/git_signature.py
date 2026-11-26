@@ -57,6 +57,7 @@ def untracked_source(root: Path, relative: str, *, budget: FingerprintBudget) ->
         raise CommandError("Untracked review source is not valid UTF-8") from None
     if "\0" in text:
         raise CommandError("Untracked review source contains NUL")
+    budget.check()
     return text
 
 

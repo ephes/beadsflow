@@ -107,9 +107,10 @@ same configured Beads-directory and execution-lock exclusions as review signatur
 Untracked sources must be regular UTF-8 files without NUL; symlinks, directories
 (including nested repositories), special files and binary/invalid UTF-8 sources
 are refused before reviewer launch. Reads share the fingerprint path, generation,
-byte and deadline checks, with source bytes additionally bounded by the smaller
-of the patch limit and 64 KiB prompt limit. Track or ignore unsupported files
-deliberately before retrying. Tracked patches are rendered as text (`git diff --text`),
+byte and deadline checks. The same deadline is checked after UTF-8 decoding and
+NUL inspection before source text is admitted. Source bytes are additionally
+bounded by the smaller of the patch limit and 64 KiB prompt limit. Track or ignore
+unsupported files deliberately before retrying. Tracked patches are rendered as text (`git diff --text`),
 so binary classification or a `-diff` attribute cannot hide a change; their raw bytes,
 including carriage returns, are shown, and invalid UTF-8 or NUL content refuses the
 review the same way.

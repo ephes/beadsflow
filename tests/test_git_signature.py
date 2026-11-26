@@ -395,6 +395,37 @@ def test_unchanged_nested_untracked_evidence(tmp_path: Path) -> None:
     assert untracked_source(tmp_path, "outer/inner/entry", budget=FingerprintBudget.start()) == "reviewed"
 
 
+def test_untracked_source_refuses_deadline_after_decode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    from types import FrameType
+
+    import beadsflow.infra.git_signature as signatures
+
+    (tmp_path / "entry").write_bytes("synthetic café".encode())
+    budget = signatures.FingerprintBudget(deadline=1.0, remaining_bytes=64)
+    now = 0.0
+
+    def profile(frame: FrameType, event: str, arg: object) -> None:
+        nonlocal now
+        # Advance at the real bytes.decode boundary, after filesystem checks.
+        if (
+            event == "c_return"
+            and frame.f_code is signatures.untracked_source.__code__
+            and getattr(arg, "__name__", None) == "decode"
+        ):
+            now = budget.deadline
+
+    monkeypatch.setattr(signatures, "monotonic", lambda: now)
+    previous_profile = sys.getprofile()
+    sys.setprofile(profile)
+    try:
+        with pytest.raises(CommandError, match="Untracked fingerprint deadline exceeded"):
+            signatures.untracked_source(tmp_path, "entry", budget=budget)
+    finally:
+        sys.setprofile(previous_profile)
+    assert now == budget.deadline
+
+
 def test_carriage_return_name_is_not_confused_with_newline_name(loop: EpicRunLoop) -> None:
     root = loop.repo_paths.repo_root
     carriage = root / "name\rsuffix"
